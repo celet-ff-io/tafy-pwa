@@ -67,6 +67,11 @@
               binaryen
             ];
             shellHook = ''
+              # the dioxus-cli closure drags wasm-bindgen 0.2.126 onto PATH
+              # ahead of the user's dirs, which would SHADOW the required
+              # cargo-installed 0.2.130 — put ~/.local/bin first (verified
+              # 2026-11-09: dx errors on any wasm-bindgen != 0.2.130).
+              export PATH="$HOME/.local/bin:$PATH"
               # wasm-bindgen-cli is deliberately NOT in the shell:
               # dioxus 0.7.10 pins wasm-bindgen =0.2.130 (Cargo refuses a
               # --precise downgrade), nixpkgs ships only 0.2.127 and
