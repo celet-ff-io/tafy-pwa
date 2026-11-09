@@ -165,6 +165,42 @@ body {
   font: inherit;
 }
 
+/* P2 message blocks: author / text / ts — ts is a STANDALONE dim line
+   at text level, never a claim glued to the author (principal rule) */
+.msg {
+  margin: 0 0 20px;
+}
+
+.msg-author {
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.msg-author.self {
+  color: var(--acc);
+}
+
+.msg-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.msg-ts {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.sys {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--dim);
+}
+
 /* cards (P3 contacts, P4 settings) */
 .card {
   margin: 12px 16px;
