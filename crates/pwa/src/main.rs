@@ -1,9 +1,13 @@
 // tafy-pwa — empty shell (mock era).
-// IA v0 (principal-approved): P1 chats list, P2 chat detail, P3 contacts,
-// P4 settings, P5 degrade page; C1 bottom 3-tab navigation, mobile-first.
-// Mock seam: typed in-memory placeholders ONLY — the real wasm core
-// (LPZ106) plugs in behind this seam at the wiring phase. No network,
-// no crypto, no persistence (A16 mock era; A17 WASM-local architecture).
+// IA v1 (principal ruling 2026-11-10): the message level knows only
+// THREADS (消息链) — "会话" was a zconnor-connection term, dropped from
+// UI vocabulary. Navigation: HOME = single root page hosting threads
+// (primary) + contacts + settings sections (no tab bar); a thread
+// opens FULL-SCREEN and focused (back returns home), like an AI chat
+// conversation view. Mock seam: typed in-memory placeholders ONLY —
+// the real wasm core (LPZ106) plugs in behind this seam at the wiring
+// phase. No network, no crypto, no persistence (A16 mock era; A17
+// WASM-local architecture).
 
 use dioxus::prelude::*;
 
@@ -13,15 +17,10 @@ fn main() {
 
 #[derive(Clone, Routable, Debug, PartialEq)]
 enum Route {
-    #[layout(Shell)]
     #[route("/")]
-    Chats {},
-    #[route("/contacts")]
-    Contacts {},
-    #[route("/settings")]
-    Settings {},
-    #[route("/chat/:id")]
-    Chat { id: String },
+    Home {},
+    #[route("/thread/:id")]
+    ThreadPage { id: String },
     #[route("/:..segments")]
     NotFound { segments: Vec<String> },
 }
@@ -34,26 +33,11 @@ fn App() -> Element {
     }
 }
 
-/// Persistent frame: routed page + bottom tab bar (C1).
-#[component]
-fn Shell() -> Element {
-    rsx! {
-        main { class: "shell",
-            Outlet::<Route> {}
-            nav { class: "tabbar",
-                Link { to: Route::Chats {}, class: "tab", active_class: "active", "会话" }
-                Link { to: Route::Contacts {}, class: "tab", active_class: "active", "联系人" }
-                Link { to: Route::Settings {}, class: "tab", active_class: "active", "设置" }
-            }
-        }
-    }
-}
-
 // ---- mock seam (typed; replaced by the real core at wiring phase) ----
 
-struct Session {
+struct Thread {
     id: &'static str,
-    peer: &'static str,
+    title: &'static str,
     last: &'static str,
     unread: u8,
 }
@@ -77,8 +61,8 @@ enum Kind {
 
 struct Event {
     kind: Kind,
-    /// owning session id
-    session: &'static str,
+    /// owning thread id
+    thread: &'static str,
     /// display name; empty = system (SysFact)
     author: &'static str,
     text: &'static str,
@@ -87,57 +71,22 @@ struct Event {
     ts: u64,
 }
 
-const SESSIONS: &[Session] = &[
-    Session {
-        id: "alpha",
-        peer: "Alpha",
-        last: "first-light",
-        unread: 1,
-    },
-    Session {
-        id: "beta",
-        peer: "Beta",
-        last: "中继未配置",
-        unread: 0,
-    },
+const THREADS: &[Thread] = &[
+    Thread { id: "alpha", title: "Alpha", last: "进行中 — 这条流是 typed mock", unread: 1 },
+    Thread { id: "beta", title: "Beta", last: "中继未配置", unread: 0 },
+];
+
+const DEVICES: &[Device] = &[
+    Device { id: "self", name: "本机（此浏览器）", fingerprint: "···· ···· ···· ····" },
+    Device { id: "peer", name: "对端设备（示例）", fingerprint: "···· ···· ···· ····" },
 ];
 
 const EVENTS: &[Event] = &[
-    Event {
-        kind: Kind::SysFact,
-        session: "alpha",
-        author: "",
-        text: "first-light 链路验证通过（mock）",
-        ts: 1794271800000,
-    },
-    Event {
-        kind: Kind::Message,
-        session: "alpha",
-        author: "Alpha",
-        text: "first-light",
-        ts: 1794271860000,
-    },
-    Event {
-        kind: Kind::Message,
-        session: "alpha",
-        author: "我",
-        text: "收到，链路正常",
-        ts: 1794271920000,
-    },
-    Event {
-        kind: Kind::Message,
-        session: "alpha",
-        author: "Alpha",
-        text: "继续空壳实现",
-        ts: 1794271980000,
-    },
-    Event {
-        kind: Kind::Message,
-        session: "alpha",
-        author: "我",
-        text: "进行中 — 这条流是 typed mock",
-        ts: 1794272040000,
-    },
+    Event { kind: Kind::SysFact, thread: "alpha", author: "", text: "first-light 链路验证通过（mock）", ts: 1794271800000 },
+    Event { kind: Kind::Message, thread: "alpha", author: "Alpha", text: "first-light", ts: 1794271860000 },
+    Event { kind: Kind::Message, thread: "alpha", author: "我", text: "收到，链路正常", ts: 1794271920000 },
+    Event { kind: Kind::Message, thread: "alpha", author: "Alpha", text: "继续空壳实现", ts: 1794271980000 },
+    Event { kind: Kind::Message, thread: "alpha", author: "我", text: "进行中 — 这条流是 typed mock", ts: 1794272040000 },
 ];
 
 /// Hand-rolled civil-from-days formatter (no chrono dep in the shell).
@@ -157,116 +106,105 @@ fn fmt_ts(ms: u64) -> String {
     format!("{:04}-{:02}-{:02} {:02}:{:02}", y, m, d, hh, mm)
 }
 
-const DEVICES: &[Device] = &[
-    Device {
-        id: "self",
-        name: "本机（此浏览器）",
-        fingerprint: "···· ···· ···· ····",
-    },
-    Device {
-        id: "peer",
-        name: "对端设备（示例）",
-        fingerprint: "···· ···· ···· ····",
-    },
-];
-
-// ---- P1: chats list ----
+// ---- P-Home: threads (primary) + contacts + settings sections ----
 
 #[component]
-fn Chats() -> Element {
+fn Home() -> Element {
     rsx! {
-        h1 { class: "page-title", "会话" }
-        ul { class: "chat-list",
-            for s in SESSIONS {
-                li { key: "{s.id}",
-                    Link { to: Route::Chat { id: s.id.to_string() }, class: "chat-row",
-                        div { class: "chat-main",
-                            span { class: "chat-peer", "{s.peer}" }
-                            span { class: "chat-last", "{s.last}" }
-                        }
-                        if s.unread > 0 {
-                            span { class: "badge", "{s.unread}" }
-                        }
+        h1 { class: "page-title", "主页" }
+
+        // threads — the primary section
+        div { class: "group",
+            for t in THREADS {
+                Link { key: "{t.id}", to: Route::ThreadPage { id: t.id.to_string() }, class: "row",
+                    div { class: "row-main",
+                        span { class: "row-title", "{t.title}" }
+                        span { class: "row-sub", "{t.last}" }
+                    }
+                    if t.unread > 0 {
+                        span { class: "badge", "{t.unread}" }
                     }
                 }
             }
         }
-    }
-}
 
-// ---- P2: chat detail (mock stream; send = disabled) ----
-
-#[component]
-fn Chat(id: String) -> Element {
-    let session = SESSIONS.iter().find(|s| s.id == id);
-    let stream: Vec<&Event> = EVENTS.iter().filter(|e| e.session == id).collect();
-    rsx! {
-        header { class: "chat-head",
-            Link { to: Route::Chats {}, class: "back", "‹" }
-            strong { "{session.map(|s| s.peer).unwrap_or(\"未知会话\")}" }
-        }
-        div { class: "chat-stream",
-            if session.is_none() {
-                p { class: "hint", "未知会话 — 降级视图" }
-            } else if stream.is_empty() {
-                p { class: "hint", "消息流待装填（等待 106 的 core）" }
-            }
-            for e in stream {
-                match e.kind {
-                    Kind::Message => rsx! {
-                        div { key: "{e.ts}", class: "msg",
-                            div { class: "msg-author", class: if e.author == "我" { "self" } else { "" }, "{e.author}" }
-                            div { class: "msg-text", "{e.text}" }
-                            div { class: "msg-ts", "{fmt_ts(e.ts)}" }
-                        }
-                    },
-                    Kind::SysFact => rsx! {
-                        div { key: "{e.ts}", class: "sys", "{e.text} · {fmt_ts(e.ts)}" }
-                    },
+        // contacts / devices
+        div { class: "section-title", "联系人" }
+        div { class: "group",
+            for d in DEVICES {
+                div { key: "{d.id}", class: "row",
+                    div { class: "row-main",
+                        span { class: "row-title", "{d.name}" }
+                        span { class: "row-sub", "指纹 {d.fingerprint}" }
+                    }
                 }
             }
         }
-        form { class: "composer", onsubmit: move |e| e.prevent_default(),
-            div { class: "field",
-                input { r#type: "text", placeholder: "空壳阶段不可发送", disabled: true }
-                button { class: "send", r#type: "submit", disabled: true, "↑" }
+
+        // settings
+        div { class: "section-title", "设置" }
+        div { class: "group",
+            div { class: "row",
+                div { class: "row-main",
+                    span { class: "row-title", "身份" }
+                    span { class: "row-sub", "未配置 — 密钥模型待 D2 轮" }
+                }
+            }
+            div { class: "row",
+                div { class: "row-main",
+                    span { class: "row-title", "中继" }
+                    span { class: "row-sub", "未配置 — 等待 106 的中继浏览器面" }
+                }
+            }
+            div { class: "row",
+                div { class: "row-main",
+                    span { class: "row-title", "关于" }
+                    span { class: "row-sub", "tafy · first-light · mock 时代" }
+                }
             }
         }
     }
 }
 
-// ---- P3: contacts / devices ----
+// ---- P-Thread: full-screen focused thread (no tab bar) ----
 
 #[component]
-fn Contacts() -> Element {
+fn ThreadPage(id: String) -> Element {
+    let thread = THREADS.iter().find(|t| t.id == id);
+    let stream: Vec<&Event> = EVENTS.iter().filter(|e| e.thread == id).collect();
     rsx! {
-        h1 { class: "page-title", "联系人" }
-        for d in DEVICES {
-            div { key: "{d.id}", class: "card",
-                h2 { "{d.name}" }
-                p { "指纹 {d.fingerprint}" }
+        div { class: "thread",
+            header { class: "thread-head",
+                Link { to: Route::Home {}, class: "back", "‹" }
+                strong { "{thread.map(|t| t.title).unwrap_or(\"未知线程\")}" }
             }
-        }
-    }
-}
-
-// ---- P4: settings ----
-
-#[component]
-fn Settings() -> Element {
-    rsx! {
-        h1 { class: "page-title", "设置" }
-        div { class: "card",
-            h2 { "身份" }
-            p { "未配置 — 密钥模型待 D2 轮" }
-        }
-        div { class: "card",
-            h2 { "中继" }
-            p { "未配置 — 等待 106 的中继浏览器面" }
-        }
-        div { class: "card",
-            h2 { "关于" }
-            p { "tafy · first-light · 空壳（mock 时代，无真实数据）" }
+            div { class: "thread-stream",
+                if thread.is_none() {
+                    p { class: "hint", "未知线程 — 降级视图" }
+                } else if stream.is_empty() {
+                    p { class: "hint", "消息流待装填（等待 106 的 core）" }
+                }
+                for e in stream {
+                    match e.kind {
+                        Kind::Message => rsx! {
+                            div { key: "{e.ts}", class: "msg",
+                                div { class: "msg-author", class: if e.author == "我" { "self" } else { "" }, "{e.author}" }
+                                div { class: "msg-text", "{e.text}" }
+                                div { class: "msg-ts", "{fmt_ts(e.ts)}" }
+                            }
+                        },
+                        Kind::SysFact => rsx! {
+                            div { key: "{e.ts}", class: "sys", "{e.text} · {fmt_ts(e.ts)}" }
+                        },
+                    }
+                }
+            }
+            form { class: "composer", onsubmit: move |e| e.prevent_default(),
+                div { class: "field",
+                    input { r#type: "text", placeholder: "空壳阶段不可发送", disabled: true }
+                    button { class: "send", r#type: "submit", disabled: true, "↑" }
+                }
+            }
         }
     }
 }
@@ -276,7 +214,7 @@ fn Settings() -> Element {
 #[component]
 fn NotFound(segments: Vec<String>) -> Element {
     rsx! {
-        div { class: "chat-stream",
+        div { class: "thread-stream",
             p { class: "hint", "未知页面 — 降级视图" }
             p { class: "hint", "路径: /{segments.join(\"/\")}" }
         }

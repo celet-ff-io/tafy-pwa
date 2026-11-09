@@ -28,13 +28,12 @@ body {
 }
 
 :root {
-  --tabbar-h: 48px;
+  --composer-h: 62px;
 }
 
-/* frame: page content + fixed bottom tab bar (safe-area aware) */
+/* IA v1: home = single root (no tab bar); thread = full-screen focused */
 .shell {
   min-height: 100dvh;
-  padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
 }
 
 .page-title {
@@ -94,38 +93,69 @@ body {
   font-size: 12px;
 }
 
-/* C1 bottom tab bar */
-.tabbar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  height: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--line);
-  background: rgba(15, 17, 21, 0.88);
-  backdrop-filter: blur(12px);
-  padding-bottom: env(safe-area-inset-bottom);
+/* home section groups (iOS inset-group look) */
+.section-title {
+  margin: 20px 16px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dim);
 }
 
-.tab {
-  flex: 1;
+.group {
+  margin: 0 16px 8px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.row {
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  color: var(--dim);
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 14px;
+  color: inherit;
   text-decoration: none;
 }
 
-.tab.active {
-  color: var(--fg);
+.row + .row {
+  border-top: 1px solid var(--line);
 }
 
-/* P2 chat detail */
-.chat-head {
+a.row:active {
+  background: var(--line);
+}
+
+.row-main {
+  min-width: 0;
+}
+
+.row-title {
+  display: block;
+  font-weight: 600;
+}
+
+.row-sub {
+  display: block;
+  font-size: 13px;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* thread: full-screen focused view */
+.thread {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.thread-head {
   position: sticky;
   top: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -141,8 +171,9 @@ body {
   text-decoration: none;
 }
 
-.chat-stream {
-  padding: 16px 16px calc(130px + env(safe-area-inset-bottom));
+.thread-stream {
+  flex: 1;
+  padding: 16px 16px calc(var(--composer-h) + 20px + env(safe-area-inset-bottom));
 }
 
 .hint {
@@ -151,13 +182,13 @@ body {
   color: var(--dim);
 }
 
-/* composer sits ABOVE the tabbar, never under it */
+/* composer pinned to the thread's bottom edge (safe-area aware) */
 .composer {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
-  padding: 10px 12px;
+  bottom: 0;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--line);
   background: var(--bg);
 }
