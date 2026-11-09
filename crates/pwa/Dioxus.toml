@@ -12,7 +12,7 @@ title = "tafy"
 # deploy prefix, e.g. /some/page when the bundle lives in dir page/
 # of repo some (URL https://<user>.github.io/some/page/).
 # USER site (<user>.github.io) keeps "/" — one line either way.
-base_path = "/some/page"
+base_path = "/tafy"
 
 # pwa-static files live in public/ (copied verbatim): manifest,
 # sw.js, pwa.js (SW registration), icons. index.html (crate root)
