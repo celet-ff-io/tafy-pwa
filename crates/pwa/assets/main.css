@@ -266,28 +266,3 @@ body {
   font-size: 14px;
   color: var(--dim);
 }
-
-/* install chip (Chrome's beforeinstallprompt capture; pwa.js injects
-   it as a body-level element — floating pill, top-right, dismissible) */
-.install-chip {
-  position: fixed;
-  top: calc(env(safe-area-inset-top) + 64px);
-  right: 12px;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--panel);
-  color: var(--fg);
-  font: 14px/1 inherit;
-  font-family: inherit;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-}
-
-.install-chip .install-x {
-  margin-left: 4px;
-  color: var(--dim);
-}
