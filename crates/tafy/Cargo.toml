@@ -1,0 +1,42 @@
+[package]
+name = "tafy"
+version = "0.1.0-alpha"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Single main bin (the workspace's one product binary; the PWA leg is a
+# separate wasm crate when P1 scaffolds it). Bin layout mirrors zconned.
+[[bin]]
+name = "tafy"
+path = "src/bin/tafy/main.rs"
+
+[dependencies]
+# bin-only generic infra; publish = false
+log.workspace = true
+env_logger.workspace = true
+miette.workspace = true
+clap.workspace = true
+clap-verbosity-flag.workspace = true
+tap.workspace = true
+thiserror.workspace = true
+typed-builder.workspace = true
+getset.workspace = true
+bytes.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+dirs.workspace = true
+tokio = { workspace = true, features = [
+  "io-util",
+  "io-std",
+  "macros",
+  "rt",
+  "rt-multi-thread",
+  "time",
+] }
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+tempfile.workspace = true

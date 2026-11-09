@@ -1,0 +1,42 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+authors = ["celet-ff-io"]
+edition = "2024"
+rust-version = "1.98"
+publish = false
+
+[workspace.dependencies]
+# -- in-workspace crates --
+tafy = { path = "crates/tafy" }
+
+# -- generic infra (mirrored from the zconn workspace, 2026-11-09 scaffold) --
+tap = "1.0.1"
+thiserror = "2.0.21"
+miette = { version = "7.6.0", features = ["fancy"] }
+pretty_assertions = "1.4.1"
+tempfile = "3.27.0"
+typed-builder = "0.23.2"
+getset = "0.1.7"
+bytes = "1.12.1"
+tokio = "1.54.1"
+log = "0.4.35"
+env_logger = "0.11.11"
+clap = { version = "4.6.7", features = ["derive"] }
+clap-verbosity-flag = "3.0.4"
+serde = "1.0.229"
+serde_json = "1.0.154"
+time = { version = "0.3", features = ["formatting", "parsing", "std"] }
+dirs = "7.0.0"
+
+# -- PWA leg (D0 ruling, principal 2026-11-09: Rust -> WASM via Dioxus) --
+# referenced once the pwa crate exists (P1); 0.8 line is alpha, stay on 0.7.
+dioxus = { version = "0.7.10", features = ["web"] }
+
+# DELIBERATELY ABSENT (do not add without the owning round):
+# - crypto deps (ed25519-dalek / x25519-dalek / sha3 / zeroize / ...):
+#   D2 round (browser key storage); the daemon carries zero keys contract.
+# - LPZ106 path/git deps (zconned-stdio-types / io-link / ...):
+#   D1 gate; LPZ106 is read-only for this project, deps enter with D1.
