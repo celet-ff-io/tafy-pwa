@@ -103,11 +103,41 @@ const SESSIONS: &[Session] = &[
 ];
 
 const EVENTS: &[Event] = &[
-    Event { kind: Kind::SysFact, session: "alpha", author: "", text: "first-light 链路验证通过（mock）", ts: 1794271800000 },
-    Event { kind: Kind::Message, session: "alpha", author: "Alpha", text: "first-light", ts: 1794271860000 },
-    Event { kind: Kind::Message, session: "alpha", author: "我", text: "收到，链路正常", ts: 1794271920000 },
-    Event { kind: Kind::Message, session: "alpha", author: "Alpha", text: "继续空壳实现", ts: 1794271980000 },
-    Event { kind: Kind::Message, session: "alpha", author: "我", text: "进行中 — 这条流是 typed mock", ts: 1794272040000 },
+    Event {
+        kind: Kind::SysFact,
+        session: "alpha",
+        author: "",
+        text: "first-light 链路验证通过（mock）",
+        ts: 1794271800000,
+    },
+    Event {
+        kind: Kind::Message,
+        session: "alpha",
+        author: "Alpha",
+        text: "first-light",
+        ts: 1794271860000,
+    },
+    Event {
+        kind: Kind::Message,
+        session: "alpha",
+        author: "我",
+        text: "收到，链路正常",
+        ts: 1794271920000,
+    },
+    Event {
+        kind: Kind::Message,
+        session: "alpha",
+        author: "Alpha",
+        text: "继续空壳实现",
+        ts: 1794271980000,
+    },
+    Event {
+        kind: Kind::Message,
+        session: "alpha",
+        author: "我",
+        text: "进行中 — 这条流是 typed mock",
+        ts: 1794272040000,
+    },
 ];
 
 /// Hand-rolled civil-from-days formatter (no chrono dep in the shell).
