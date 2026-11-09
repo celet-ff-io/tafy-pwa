@@ -1,13 +1,14 @@
 // tafy-pwa — empty shell (mock era).
-// IA v1 (principal ruling 2026-11-10): the message level knows only
-// THREADS (消息链) — "会话" was a zconnor-connection term, dropped from
-// UI vocabulary. Navigation: HOME = single root page hosting threads
-// (primary) + contacts + settings sections (no tab bar); a thread
-// opens FULL-SCREEN and focused (back returns home), like an AI chat
-// conversation view. Mock seam: typed in-memory placeholders ONLY —
-// the real wasm core (LPZ106) plugs in behind this seam at the wiring
-// phase. No network, no crypto, no persistence (A16 mock era; A17
-// WASM-local architecture).
+// IA v2 (principal design, 2026-11-10): layout principle = put
+// length-variant lists where NOTHING sits below them (same reason a
+// thread is full-screen). Home = topbar (wordmark "Tafy" + me/settings
+// buttons) over a free-growing thread list. Me page = identity hint
+// over the contacts list (variable, nothing below). Settings = its own
+// page. Thread = full-screen focused. The message level knows only
+// THREADS (消息链) — "会话" was a zconnor-connection term, dropped.
+// Mock seam: typed in-memory placeholders ONLY — the real wasm core
+// (LPZ106) plugs in behind this seam at the wiring phase. No network,
+// no crypto, no persistence (A16 mock era; A17 WASM-local architecture).
 
 use dioxus::prelude::*;
 
@@ -19,6 +20,10 @@ fn main() {
 enum Route {
     #[route("/")]
     Home {},
+    #[route("/me")]
+    Me {},
+    #[route("/settings")]
+    Settings {},
     #[route("/thread/:id")]
     ThreadPage { id: String },
     #[route("/:..segments")]
@@ -106,67 +111,106 @@ fn fmt_ts(ms: u64) -> String {
     format!("{:04}-{:02}-{:02} {:02}:{:02}", y, m, d, hh, mm)
 }
 
-// ---- P-Home: threads (primary) + contacts + settings sections ----
+// ---- P-Home: topbar over a free-growing thread list ----
 
 #[component]
 fn Home() -> Element {
     rsx! {
-        h1 { class: "page-title", "主页" }
-
-        // threads — the primary section
-        div { class: "group",
-            for t in THREADS {
-                Link { key: "{t.id}", to: Route::ThreadPage { id: t.id.to_string() }, class: "row",
-                    div { class: "row-main",
-                        span { class: "row-title", "{t.title}" }
-                        span { class: "row-sub", "{t.last}" }
+        div { class: "page",
+            header { class: "topbar",
+                h1 { class: "wordmark", "Tafy" }
+                div { class: "topbar-actions",
+                    Link { to: Route::Me {}, class: "icon-btn", title: "Me",
+                        svg { fill: "none", stroke: "currentColor", stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round", view_box: "0 0 24 24",
+                            path { d: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" }
+                            circle { cx: "12", cy: "7", r: "4" }
+                        }
                     }
-                    if t.unread > 0 {
-                        span { class: "badge", "{t.unread}" }
-                    }
-                }
-            }
-        }
-
-        // contacts / devices
-        div { class: "section-title", "联系人" }
-        div { class: "group",
-            for d in DEVICES {
-                div { key: "{d.id}", class: "row",
-                    div { class: "row-main",
-                        span { class: "row-title", "{d.name}" }
-                        span { class: "row-sub", "指纹 {d.fingerprint}" }
+                    Link { to: Route::Settings {}, class: "icon-btn", title: "设置",
+                        svg { fill: "none", stroke: "currentColor", stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round", view_box: "0 0 24 24",
+                            circle { cx: "12", cy: "12", r: "3" }
+                            path { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" }
+                        }
                     }
                 }
             }
-        }
-
-        // settings
-        div { class: "section-title", "设置" }
-        div { class: "group",
-            div { class: "row",
-                div { class: "row-main",
-                    span { class: "row-title", "身份" }
-                    span { class: "row-sub", "未配置 — 密钥模型待 D2 轮" }
-                }
-            }
-            div { class: "row",
-                div { class: "row-main",
-                    span { class: "row-title", "中继" }
-                    span { class: "row-sub", "未配置 — 等待 106 的中继浏览器面" }
-                }
-            }
-            div { class: "row",
-                div { class: "row-main",
-                    span { class: "row-title", "关于" }
-                    span { class: "row-sub", "tafy · first-light · mock 时代" }
+            div { class: "list",
+                for t in THREADS {
+                    Link { key: "{t.id}", to: Route::ThreadPage { id: t.id.to_string() }, class: "row",
+                        div { class: "row-main",
+                            span { class: "row-title", "{t.title}" }
+                            span { class: "row-sub", "{t.last}" }
+                        }
+                        if t.unread > 0 {
+                            span { class: "badge", "{t.unread}" }
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-// ---- P-Thread: full-screen focused thread (no tab bar) ----
+// ---- P-Me: identity hint + contacts list (variable, nothing below) ----
+
+#[component]
+fn Me() -> Element {
+    rsx! {
+        div { class: "page",
+            header { class: "page-head",
+                Link { to: Route::Home {}, class: "back", "‹" }
+                strong { "Me" }
+            }
+            p { class: "page-hint", "身份待 D2 轮（密钥模型）— 联系人：" }
+            div { class: "list",
+                for d in DEVICES {
+                    div { key: "{d.id}", class: "row",
+                        div { class: "row-main",
+                            span { class: "row-title", "{d.name}" }
+                            span { class: "row-sub", "指纹 {d.fingerprint}" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---- P-Settings: static rows ----
+
+#[component]
+fn Settings() -> Element {
+    rsx! {
+        div { class: "page",
+            header { class: "page-head",
+                Link { to: Route::Home {}, class: "back", "‹" }
+                strong { "设置" }
+            }
+            div { class: "list",
+                div { class: "row",
+                    div { class: "row-main",
+                        span { class: "row-title", "身份" }
+                        span { class: "row-sub", "未配置 — 密钥模型待 D2 轮" }
+                    }
+                }
+                div { class: "row",
+                    div { class: "row-main",
+                        span { class: "row-title", "中继" }
+                        span { class: "row-sub", "未配置 — 等待 106 的中继浏览器面" }
+                    }
+                }
+                div { class: "row",
+                    div { class: "row-main",
+                        span { class: "row-title", "关于" }
+                        span { class: "row-sub", "tafy · first-light · mock 时代" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---- P-Thread: full-screen focused thread ----
 
 #[component]
 fn ThreadPage(id: String) -> Element {
@@ -174,7 +218,7 @@ fn ThreadPage(id: String) -> Element {
     let stream: Vec<&Event> = EVENTS.iter().filter(|e| e.thread == id).collect();
     rsx! {
         div { class: "thread",
-            header { class: "thread-head",
+            header { class: "page-head",
                 Link { to: Route::Home {}, class: "back", "‹" }
                 strong { "{thread.map(|t| t.title).unwrap_or(\"未知线程\")}" }
             }

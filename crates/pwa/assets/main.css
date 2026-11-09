@@ -1,6 +1,9 @@
-/* tafy — empty shell v0. Visual language: AI-provider web-chat minimal
-   (principal ruling 2026-11-10): no bubbles, full-width blocks, system
-   font, one accent, generous whitespace. Mobile-first, dark theme. */
+/* tafy — shell v2. Layout principle (principal, 2026-11-10): put
+   length-variant lists where NOTHING sits below them — Home = topbar
+   (wordmark + me/settings buttons) over a free-growing thread list;
+   Me = identity hint over a free-growing contacts list; Thread =
+   full-screen stream over a pinned composer. AI-chat minimalism:
+   no bubbles, full-width blocks, system font, one accent, dark. */
 
 :root {
   color-scheme: dark;
@@ -27,86 +30,80 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-:root {
-  --composer-h: 62px;
-}
-
-/* IA v1: home = single root (no tab bar); thread = full-screen focused */
-.shell {
+.page {
   min-height: 100dvh;
+  padding-bottom: 24px;
 }
 
-.page-title {
-  font-size: 22px;
-  font-weight: 650;
-  letter-spacing: 0.2px;
-  margin: 0;
-  padding: 20px 16px 8px;
-}
-
-/* P1 chats list */
-.chat-list {
-  list-style: none;
-  margin: 0;
-  padding: 0 8px;
-}
-
-.chat-row {
+/* home topbar: wordmark left, me + settings icon buttons right */
+.topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 14px 12px;
-  border-radius: 12px;
-  color: inherit;
+  padding: 16px 16px 8px;
+}
+
+.wordmark {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+
+.topbar-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dim);
+}
+
+.icon-btn:active {
+  background: var(--panel);
+  color: var(--fg);
+}
+
+.icon-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* generic page header (Me / Settings / Thread) */
+.page-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.back {
+  font-size: 22px;
+  line-height: 1;
+  color: var(--dim);
   text-decoration: none;
 }
 
-.chat-row:active {
-  background: var(--panel);
-}
-
-.chat-main {
-  min-width: 0;
-}
-
-.chat-peer {
-  display: block;
-  font-weight: 600;
-}
-
-.chat-last {
-  display: block;
-  font-size: 14px;
-  color: var(--dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.badge {
-  flex: none;
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: var(--acc);
-  color: #fff;
-  font-size: 12px;
-}
-
-/* home section groups (iOS inset-group look) */
-.section-title {
-  margin: 20px 16px 6px;
+.page-hint {
+  margin: 12px 16px 4px;
   font-size: 13px;
-  font-weight: 600;
   color: var(--dim);
 }
 
-.group {
-  margin: 0 16px 8px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--panel);
-  overflow: hidden;
+/* lists: free-growing rows; a variant list never has content below it */
+.list {
+  padding-bottom: 8px;
 }
 
 .row {
@@ -114,17 +111,17 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 13px 14px;
+  padding: 14px 16px;
   color: inherit;
   text-decoration: none;
 }
 
-.row + .row {
-  border-top: 1px solid var(--line);
+.row:active {
+  background: var(--panel);
 }
 
-a.row:active {
-  background: var(--line);
+.row + .row {
+  border-top: 1px solid var(--line);
 }
 
 .row-main {
@@ -145,6 +142,15 @@ a.row:active {
   text-overflow: ellipsis;
 }
 
+.badge {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--acc);
+  color: #fff;
+  font-size: 12px;
+}
+
 /* thread: full-screen focused view */
 .thread {
   min-height: 100dvh;
@@ -152,34 +158,9 @@ a.row:active {
   flex-direction: column;
 }
 
-.thread-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg);
-}
-
-.back {
-  font-size: 22px;
-  line-height: 1;
-  color: var(--dim);
-  text-decoration: none;
-}
-
 .thread-stream {
   flex: 1;
-  padding: 16px 16px calc(var(--composer-h) + 20px + env(safe-area-inset-bottom));
-}
-
-.hint {
-  margin: 0 0 8px;
-  font-size: 14px;
-  color: var(--dim);
+  padding: 16px 16px calc(76px + env(safe-area-inset-bottom));
 }
 
 /* composer pinned to the thread's bottom edge (safe-area aware) */
@@ -193,7 +174,7 @@ a.row:active {
   background: var(--bg);
 }
 
-/* DeepSeek/Qwen-style pill field with an inner round send button */
+/* pill field with an inner round send button */
 .composer .field {
   position: relative;
 }
@@ -226,7 +207,7 @@ a.row:active {
   opacity: 0.45; /* disabled in the shell */
 }
 
-/* P2 message blocks: author / text / ts — ts is a STANDALONE dim line
+/* message blocks: author / text / ts — ts is a STANDALONE dim line
    at text level, never a claim glued to the author (principal rule) */
 .msg {
   margin: 0 0 20px;
@@ -262,22 +243,8 @@ a.row:active {
   color: var(--dim);
 }
 
-/* cards (P3 contacts, P4 settings) */
-.card {
-  margin: 12px 16px;
-  padding: 16px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--panel);
-}
-
-.card h2 {
-  margin: 0 0 6px;
-  font-size: 15px;
-}
-
-.card p {
-  margin: 0;
+.hint {
+  margin: 0 0 8px;
   font-size: 14px;
   color: var(--dim);
 }
