@@ -1,7 +1,7 @@
 // tafy-pwa — empty shell (mock era).
 // IA v2 (principal design, 2026-11-10): layout principle = put
 // length-variant lists where NOTHING sits below them (same reason a
-// thread is full-screen). Home = topbar (wordmark "Tafy" + me/settings
+// thread is full-screen). Home = topbar (wordmark "tAfY" + me/settings
 // buttons) over a free-growing thread list. Me page = identity hint
 // over the contacts list (variable, nothing below). Settings = its own
 // page. Thread = full-screen focused. The message level knows only
@@ -77,21 +77,69 @@ struct Event {
 }
 
 const THREADS: &[Thread] = &[
-    Thread { id: "alpha", title: "Alpha", last: "进行中 — 这条流是 typed mock", unread: 1 },
-    Thread { id: "beta", title: "Beta", last: "中继未配置", unread: 0 },
+    Thread {
+        id: "alpha",
+        title: "Alpha",
+        last: "进行中 — 这条流是 typed mock",
+        unread: 1,
+    },
+    Thread {
+        id: "beta",
+        title: "Beta",
+        last: "中继未配置",
+        unread: 0,
+    },
 ];
 
 const DEVICES: &[Device] = &[
-    Device { id: "self", name: "本机（此浏览器）", fingerprint: "···· ···· ···· ····" },
-    Device { id: "peer", name: "对端设备（示例）", fingerprint: "···· ···· ···· ····" },
+    Device {
+        id: "self",
+        name: "本机（此浏览器）",
+        fingerprint: "···· ···· ···· ····",
+    },
+    Device {
+        id: "peer",
+        name: "对端设备（示例）",
+        fingerprint: "···· ···· ···· ····",
+    },
 ];
 
 const EVENTS: &[Event] = &[
-    Event { kind: Kind::SysFact, thread: "alpha", author: "", text: "first-light 链路验证通过（mock）", ts: 1794271800000 },
-    Event { kind: Kind::Message, thread: "alpha", author: "Alpha", text: "first-light", ts: 1794271860000 },
-    Event { kind: Kind::Message, thread: "alpha", author: "我", text: "收到，链路正常", ts: 1794271920000 },
-    Event { kind: Kind::Message, thread: "alpha", author: "Alpha", text: "继续空壳实现", ts: 1794271980000 },
-    Event { kind: Kind::Message, thread: "alpha", author: "我", text: "进行中 — 这条流是 typed mock", ts: 1794272040000 },
+    Event {
+        kind: Kind::SysFact,
+        thread: "alpha",
+        author: "",
+        text: "first-light 链路验证通过（mock）",
+        ts: 1794271800000,
+    },
+    Event {
+        kind: Kind::Message,
+        thread: "alpha",
+        author: "Alpha",
+        text: "first-light",
+        ts: 1794271860000,
+    },
+    Event {
+        kind: Kind::Message,
+        thread: "alpha",
+        author: "我",
+        text: "收到，链路正常",
+        ts: 1794271920000,
+    },
+    Event {
+        kind: Kind::Message,
+        thread: "alpha",
+        author: "Alpha",
+        text: "继续空壳实现",
+        ts: 1794271980000,
+    },
+    Event {
+        kind: Kind::Message,
+        thread: "alpha",
+        author: "我",
+        text: "进行中 — 这条流是 typed mock",
+        ts: 1794272040000,
+    },
 ];
 
 /// Hand-rolled civil-from-days formatter (no chrono dep in the shell).
@@ -118,7 +166,7 @@ fn Home() -> Element {
     rsx! {
         div { class: "page",
             header { class: "topbar",
-                h1 { class: "wordmark", "Tafy" }
+                h1 { class: "wordmark", "tAfY" }
                 div { class: "topbar-actions",
                     Link { to: Route::Me {}, class: "icon-btn", title: "Me",
                         svg { fill: "none", stroke: "currentColor", stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round", view_box: "0 0 24 24",
@@ -202,7 +250,7 @@ fn Settings() -> Element {
                 div { class: "row",
                     div { class: "row-main",
                         span { class: "row-title", "关于" }
-                        span { class: "row-sub", "tafy · first-light · mock 时代" }
+                        span { class: "row-sub", "tAfY · first-light · mock 时代" }
                     }
                 }
             }

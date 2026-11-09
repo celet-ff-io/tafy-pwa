@@ -7,7 +7,7 @@ default_platform = "web"
 # SINGLE source of the page title: dx appends this into the static
 # <title></title> in index.html (verified 2026-11-09 — any static
 # text gets duplicated).
-title = "tafy"
+title = "tAfY"
 # gh-pages PROJECT sites serve under a SUBPATH: set to the full
 # deploy prefix, e.g. /some/page when the bundle lives in dir page/
 # of repo some (URL https://<user>.github.io/some/page/).

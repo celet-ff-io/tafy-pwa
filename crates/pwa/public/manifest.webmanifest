@@ -1,7 +1,7 @@
 {
-  "name": "tafy",
-  "short_name": "tafy",
-  "description": "tafy - the zconn web interface (first-light)",
+  "name": "tAfY",
+  "short_name": "tAfY",
+  "description": "tAfY - the zconn web interface (first-light)",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
