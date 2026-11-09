@@ -227,7 +227,10 @@ fn Chat(id: String) -> Element {
             }
         }
         form { class: "composer", onsubmit: move |e| e.prevent_default(),
-            input { r#type: "text", placeholder: "空壳阶段不可发送", disabled: true }
+            div { class: "field",
+                input { r#type: "text", placeholder: "空壳阶段不可发送", disabled: true }
+                button { class: "send", r#type: "submit", disabled: true, "↑" }
+            }
         }
     }
 }
