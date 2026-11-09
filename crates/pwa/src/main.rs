@@ -40,22 +40,24 @@ fn App() -> Element {
 
 // ---- mock seam (typed; replaced by the real core at wiring phase) ----
 
+#[derive(Clone, Debug)]
 struct Thread {
     id: &'static str,
     title: &'static str,
-    last: &'static str,
+    preview: &'static str,
     unread: u8,
 }
 
+#[derive(Clone, Debug)]
 struct Device {
     id: &'static str,
     name: &'static str,
     fingerprint: &'static str,
 }
 
-/// Render-pipeline envelope: typed event -> kind -> card renderer;
-/// unknown kind -> degrade ladder -> hint card. Shape follows the i2c
-/// grammar so the real core's event stream swaps in 1:1 at wiring.
+// mock seam: the real core's event stream swaps in behind this
+// grammar 1:1 at the wiring phase.
+/// Event kind in the i2c grammar: chat message vs system fact.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Kind {
     /// a chat message (peer or self)
@@ -64,6 +66,7 @@ enum Kind {
     SysFact,
 }
 
+#[derive(Clone, Copy, Debug)]
 struct Event {
     kind: Kind,
     /// owning thread id
@@ -71,8 +74,9 @@ struct Event {
     /// display name; empty = system (SysFact)
     author: &'static str,
     text: &'static str,
-    /// unix ms — rendered standalone, text-level (NOT an author-level
-    /// claim); principal ruling 2026-11-10
+    /// unix ms; rendered as its own text-level line
+    // layout rule: the ts line is STANDALONE text — never glued to the
+    // author line (principal ruling, 2026-11-10)
     ts: u64,
 }
 
@@ -80,13 +84,13 @@ const THREADS: &[Thread] = &[
     Thread {
         id: "alpha",
         title: "Alpha",
-        last: "进行中 — 这条流是 typed mock",
+        preview: "进行中 — 这条流是 typed mock",
         unread: 1,
     },
     Thread {
         id: "beta",
         title: "Beta",
-        last: "中继未配置",
+        preview: "中继未配置",
         unread: 0,
     },
 ];
@@ -187,7 +191,7 @@ fn Home() -> Element {
                     Link { key: "{t.id}", to: Route::ThreadPage { id: t.id.to_string() }, class: "row",
                         div { class: "row-main",
                             span { class: "row-title", "{t.title}" }
-                            span { class: "row-sub", "{t.last}" }
+                            span { class: "row-sub", "{t.preview}" }
                         }
                         if t.unread > 0 {
                             span { class: "badge", "{t.unread}" }
