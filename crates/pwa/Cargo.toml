@@ -1,0 +1,15 @@
+[package]
+name = "tafy-pwa"
+version = "0.1.0-alpha"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Web-only wasm bin; built by `dx build` (wasm32-unknown-unknown).
+[dependencies]
+dioxus.workspace = true
+
+[features]
+default = ["web"]
+web = ["dioxus/web"]

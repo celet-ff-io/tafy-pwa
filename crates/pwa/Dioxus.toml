@@ -1,0 +1,19 @@
+[application]
+# name shown by dx tooling
+name = "tafy-pwa"
+default_platform = "web"
+
+[web.app]
+# SINGLE source of the page title: dx appends this into the static
+# <title></title> in index.html (verified 2026-11-09 — any static
+# text gets duplicated).
+title = "tafy"
+# gh-pages project sites serve under a SUBPATH: set to /<repo> at
+# deploy time. If the burner repo is a USER site (<user>.github.io),
+# keep "/" — one line either way (coarse.md §2).
+base_path = "/"
+
+# pwa-static files live in public/ (copied verbatim): manifest,
+# sw.js, pwa.js (SW registration), icons. index.html (crate root)
+# carries the static head links. [pending: verify public/ copy at
+# build — done 2026-11-09, see build log in coarse]

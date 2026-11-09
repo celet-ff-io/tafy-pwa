@@ -1,0 +1,38 @@
+/* tafy first-light: mobile-first minimal shell */
+:root {
+  color-scheme: dark;
+  --bg: #101418;
+  --fg: #e6e9ec;
+  --dim: #8a919a;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-monospace, "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+}
+
+#app {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  box-sizing: border-box;
+}
+
+h1 {
+  font-size: 2rem;
+  letter-spacing: 0.2em;
+  margin: 0;
+}
+
+p {
+  color: var(--dim);
+  margin: 0;
+}
