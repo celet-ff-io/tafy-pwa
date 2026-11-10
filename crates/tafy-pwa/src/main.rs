@@ -41,6 +41,28 @@ use dioxus::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
+
+/// The web clipboard: fire-and-forget (the promise's rejection cannot
+/// be acted on — the principal ruled the clipboard universal on every
+/// browser host; no file save/load fallback face exists on the web).
+#[cfg(target_arch = "wasm32")]
+fn copy_to_clipboard(t: String) {
+    spawn_local(async move {
+        if let Some(window) = web_sys::window() {
+            let clipboard = window.navigator().clipboard();
+            let _ = wasm_bindgen_futures::JsFuture::from(
+                clipboard.write_text(&t),
+            )
+            .await;
+        }
+    });
+}
+
+/// native check face (see core.rs): compile-only stub.
+#[cfg(not(target_arch = "wasm32"))]
+fn copy_to_clipboard(t: String) {
+    let _ = t;
+}
 // native check face (see core.rs): compile-only stub — the app never
 // runs natively (A17: the core lives in a browser worker).
 #[cfg(not(target_arch = "wasm32"))]
@@ -382,6 +404,14 @@ fn Me() -> Element {
                                 span { class: "row-title", "This device (this browser)" }
                                 span { class: "row-sub", "fingerprint {self_fingerprint(&card)}" }
                             }
+                            CopyBtn { text: self_fingerprint(&card), label: "copy fp" }
+                        }
+                        div { class: "row",
+                            div { class: "row-main",
+                                span { class: "row-title", "Card (share this)" }
+                                span { class: "row-sub", "the full base64 travels via the clipboard, never the screen" }
+                            }
+                            CopyBtn { text: card.clone(), label: "copy card" }
                         }
                         div { class: "card-blob", "{card}" }
                     }
@@ -390,6 +420,25 @@ fn Me() -> Element {
                     p { class: "page-hint", "Identity not generated yet — wait for the core to finish booting" }
                 },
             }
+        }
+    }
+}
+
+/// The one-click copy face (the 107 acceptance lesson, web-adapted):
+/// long identity strings never rely on the screen — the clipboard IS
+/// the transport (every browser host is assumed to have full
+/// clipboard support; no file save/load channels on the web).
+#[component]
+fn CopyBtn(text: String, label: String) -> Element {
+    let mut copied = use_signal(|| false);
+    rsx! {
+        button {
+            class: "copy-btn",
+            onclick: move |_| {
+                copy_to_clipboard(text.clone());
+                copied.set(true);
+            },
+            if *copied.read() { "✓" } else { "{label}" }
         }
     }
 }
