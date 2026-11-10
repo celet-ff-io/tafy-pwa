@@ -401,15 +401,16 @@ fn Me() -> Element {
 
 #[component]
 fn Settings() -> Element {
-    // back = replace, not push: Home in BOTH the tap and the system
-    // swipe, without stacking a second Home entry (principal, alpha.7)
+    // back = the menu page in BOTH the tap and the system swipe: the
+    // tap replaces this entry with Menu (no stacked history), the
+    // swipe pops to it (principal, alpha.8)
     let nav = use_navigator();
     rsx! {
         div { class: "page",
             header { class: "page-head",
                 a { class: "back", href: "#", onclick: move |e| {
                     e.prevent_default();
-                    nav.replace(Route::Home {});
+                    nav.replace(Route::Menu {});
                 }, "‹" }
                 strong { "Settings" }
             }
@@ -446,20 +447,16 @@ fn Settings() -> Element {
 
 #[component]
 fn Menu() -> Element {
-    // dioxus 0.7's Link has no `replace` prop (Navigator does): the
-    // row is a plain anchor driving navigator.replace — the history
-    // stack must read [home, settings] so the system swipe (left
-    // edge = history back) returns HOME, matching the common-user
-    // and system-gesture understanding (principal, alpha.7)
-    let nav = use_navigator();
     rsx! {
         div { class: "page",
             TopBar { menu: true }
             div { class: "list",
-                a { class: "row", href: "#", onclick: move |e| {
-                    e.prevent_default();
-                    nav.replace(Route::Settings {});
-                },
+                // normal push: Settings sits ON TOP of the menu in
+                // history, so the system swipe (left edge = history
+                // back) returns to the MENU — back = the page you
+                // came from (principal, alpha.8; the alpha.7 reading
+                // "back = Home" is retracted by the principal)
+                Link { to: Route::Settings {}, class: "row",
                     // one lead group so .row's space-between can't
                     // spread icon and text to opposite edges
                     div { class: "row-lead",
@@ -469,9 +466,9 @@ fn Menu() -> Element {
                             path { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" }
                         }
                     }
-                    div { class: "row-main",
-                        span { class: "row-title", "Settings" }
-                    }
+                        div { class: "row-main",
+                            span { class: "row-title", "Settings" }
+                        }
                     }
                 }
             }
