@@ -59,7 +59,9 @@ env PATH="$WOBIN:$HOME/.local/bin:$PATH" "$DXBIN" build --release
 `~/.cache/cargo/dx/tafy-pwa/release/web/public/assets/` keeps every
 historical hash-named js/wasm/css across builds (dx does not clean).
 The LIVE set per build = index.html + the entry js it references +
-the bg wasm + css named by the entry. When staging gh-pages, copy
+the bg wasm THAT JS references + the css EMBEDDED IN THE WASM
+(manganis asset manifest inside the wasm names the css — check with
+`strings <wasm> | grep -m1 main-.*css`). When staging gh-pages, copy
 ONLY the referenced set (+ public/ files) — or clean the dist dir
 before the build — else dead hashed files ride the bundle push.
 
