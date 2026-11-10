@@ -1,9 +1,11 @@
 [package]
 name = "tafy-pwa"
-# display discipline (A18 / principal 2026-11-10): every deploy bumps
-# this — deploy N = 0.1.0-alpha.N; the Settings version display and
-# the licenses.html stamp both come from this single source.
-version = "0.1.0-alpha.4"
+# display discipline (principal 2026-11-10, amended same day): every
+# handoff to the principal for verification bumps this — one number =
+# one verification round (deployed or not); deploy ships the current
+# number. Single source: this field feeds env!("CARGO_PKG_VERSION")
+# (the version display); licenses.html carries no stamp (A18).
+version = "0.1.0-alpha.5"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true

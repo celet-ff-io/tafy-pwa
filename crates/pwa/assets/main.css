@@ -1,11 +1,12 @@
-/* tafy — shell v3 (IA v3). Layout principle (principal, 2026-11-10):
-   put length-variant lists where NOTHING sits below them — Home =
-   topbar (multi-function key + brand + me) over a free-growing thread
-   list; Me = identity hint over a free-growing contacts list; Thread
-   = full-screen stream over a pinned composer. The drawer is a
-   curated BOUNDED list with Settings pinned last (flex-end). AI-chat
-   minimalism: no bubbles, full-width blocks, system font, one accent,
-   dark + light. */
+/* tafy — shell v3.1 (IA v3.1). Layout principle (principal,
+   2026-11-10): put length-variant lists where NOTHING sits below
+   them — Home = topbar (multi-function key + brand grouped left, me
+   right) over a free-growing thread list; the menu is a FULL PAGE
+   with a curated BOUNDED list whose Settings is the last entry; Me =
+   identity hint over a free-growing contacts list; Thread =
+   full-screen stream over a pinned composer. AI-chat minimalism:
+   no bubbles, full-width blocks, system font, one accent, dark +
+   light. */
 
 :root {
   color-scheme: dark;
@@ -53,12 +54,13 @@ body {
   padding-bottom: 24px;
 }
 
-/* home topbar: multi-function key left, brand center (a breath away
-   from the key), me button right */
+/* home topbar: multi-function key + brand grouped left (a breath
+   apart — the key reads as an icon of the brand block), me at the
+   right edge */
 .topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
   padding: 16px 16px 8px;
 }
 
@@ -85,6 +87,7 @@ body {
 .topbar-actions {
   display: flex;
   gap: 6px;
+  margin-left: auto;
 }
 
 .icon-btn {
@@ -107,31 +110,16 @@ body {
   height: 20px;
 }
 
-/* the multi-function key's drawer: a curated bounded list with
-   Settings pinned last (flex-end) — future entries fill the space
-   ABOVE the pinned item; the list never grows past it downward.
-   Backdrop tap closes; the key toggles. Phone-first: no Esc key. */
-.drawer-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  background: rgba(0, 0, 0, 0.4);
+/* menu-page rows with a leading icon (Settings gear) */
+.row-icon {
+  flex: none;
+  display: flex;
+  color: var(--dim);
 }
 
-.drawer {
-  position: fixed;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 21;
-  width: 280px;
-  max-width: 80vw;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  padding: 16px 0;
-  background: var(--panel);
-  border-right: 1px solid var(--line);
+.row-icon svg {
+  width: 20px;
+  height: 20px;
 }
 
 /* About page footer: the display face of the repo LICENSE */

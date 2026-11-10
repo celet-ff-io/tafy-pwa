@@ -1,18 +1,22 @@
 // tafy-pwa — empty shell (mock era).
-// IA v3 (principal design, 2026-11-10): layout principle = put
+// IA v3.1 (principal design, 2026-11-10): layout principle = put
 // length-variant lists where NOTHING sits below them (same reason a
-// thread is full-screen). Home topbar = hamburger (the multi-function
-// key) left, wordmark+version center (a breath away from the key),
-// Me button right. All meta-destinations live in the DRAWER: a
-// curated BOUNDED list with Settings pinned last (flex-end); future
-// entries slot above it — if the list ever stopped being bounded,
-// Settings would move to a pinned footer row (never below an
-// unbounded list). Me page = identity + contacts on ONE page: Me and
-// every contact are ordinary peers — the message level is objectified
-// threads, not "DM"/"GM". Settings chain = Settings -> About ->
-// License (rare + legal content sits deep). Thread = full-screen
-// focused (the drawer does NOT enter it). The message level knows
-// only THREADS — "conversation" was a zconnor-connection term, dropped.
+// thread is full-screen). Home topbar = the multi-function key and
+// the brand grouped LEFT (a breath apart), Me at the right edge.
+// The multi-function key keeps ONE geometry on every page that has
+// it, with a two-state icon: hamburger on Home, close-X on the MENU
+// page — pressing it again returns Home. The menu is a FULL PAGE
+// (route /menu, not an overlay): a curated BOUNDED destination list
+// whose Settings is the LAST entry (with nothing above it, it sits
+// at the top, right below the key; future entries insert above it;
+// if the list ever stopped being bounded, Settings would move to a
+// pinned footer row — never below an unbounded list). Me page =
+// identity + contacts on ONE page: Me and every contact are
+// ordinary peers — the message level is objectified threads, not
+// "DM"/"GM". Settings chain = Settings -> About -> License (rare +
+// legal content sits deep). Thread = full-screen focused (no menu
+// key). The message level knows only THREADS — "conversation" was
+// a zconnor-connection term, dropped.
 // Mock seam: typed in-memory placeholders ONLY — the real wasm core
 // (LPZ106) plugs in behind this seam at the wiring phase. No network,
 // no crypto, no persistence (A16 mock era; A17 WASM-local architecture).
@@ -143,6 +147,8 @@ enum Route {
     Settings {},
     #[route("/about")]
     About {},
+    #[route("/menu")]
+    Menu {},
     #[route("/thread/:id")]
     ThreadPage { id: String },
     #[route("/:..segments")]
@@ -292,25 +298,44 @@ fn fmt_ts(ms: u64) -> String {
     format!("{:04}-{:02}-{:02} {:02}:{:02}", y, m, d, hh, mm)
 }
 
-// ---- the multi-function key's drawer ----
-// A curated bounded list (IA v3 invariant): future entries slot above
-// Settings, which is pinned LAST — visually literal via flex-end, so
-// the list grows downward only into the space above the pinned item.
+// ---- the topbar shared by list-level pages ----
+// The multi-function key keeps ONE geometry on every page that has
+// it, with a two-state icon: hamburger (opens the menu page) vs
+// close-X (returns Home). The brand sits beside the key (a breath
+// apart), Me at the right edge.
 
 #[component]
-fn Drawer(open: Signal<bool>) -> Element {
-    if !open() {
-        return rsx! { {} };
-    }
+fn TopBar(menu: bool) -> Element {
+    // compile-time constant from Cargo.toml — the single version source
+    let version = env!("CARGO_PKG_VERSION");
     rsx! {
-        div { class: "drawer-backdrop", onclick: move |_| open.set(false),
-            nav { class: "drawer", onclick: |e| e.stop_propagation(),
-                div { class: "list",
-                    Link { to: Route::Settings {}, class: "row",
-                        div { class: "row-main",
-                            span { class: "row-title", "Settings" }
-                            span { class: "row-sub", "Identity · relay · about" }
-                        }
+        header { class: "topbar",
+            if menu {
+                // on the menu page the key's icon flips to close-X:
+                // pressing it again returns Home
+                Link { to: Route::Home {}, class: "icon-btn", title: "Close",
+                    svg { fill: "none", stroke: "currentColor", stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round", view_box: "0 0 24 24",
+                        path { d: "M18 6L6 18M6 6l12 12" }
+                    }
+                }
+            } else {
+                Link { to: Route::Menu {}, class: "icon-btn", title: "Menu",
+                    svg { fill: "none", stroke: "currentColor", stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round", view_box: "0 0 24 24",
+                        path { d: "M3 6h18M3 12h18M3 18h18" }
+                    }
+                }
+            }
+            div { class: "brand",
+                h1 { class: "wordmark", "tAfY" }
+                // the deployed build id — the phone-visible answer
+                // to "is this the latest fixed version?"
+                span { class: "version", "v{version}" }
+            }
+            div { class: "topbar-actions",
+                Link { to: Route::Me {}, class: "icon-btn", title: "Me",
+                    svg { fill: "none", stroke: "currentColor", stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round", view_box: "0 0 24 24",
+                        path { d: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" }
+                        circle { cx: "12", cy: "7", r: "4" }
                     }
                 }
             }
@@ -322,33 +347,9 @@ fn Drawer(open: Signal<bool>) -> Element {
 
 #[component]
 fn Home() -> Element {
-    // compile-time constant from Cargo.toml — the single version source
-    let version = env!("CARGO_PKG_VERSION");
-    let mut menu = use_signal(|| false);
     rsx! {
         div { class: "page",
-            Drawer { open: menu }
-            header { class: "topbar",
-                button { class: "icon-btn", title: "Menu", onclick: move |_| menu.toggle(),
-                    svg { fill: "none", stroke: "currentColor", stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round", view_box: "0 0 24 24",
-                        path { d: "M3 6h18M3 12h18M3 18h18" }
-                    }
-                }
-                div { class: "brand",
-                    h1 { class: "wordmark", "tAfY" }
-                    // the deployed build id — the phone-visible answer
-                    // to "is this the latest fixed version?"
-                    span { class: "version", "v{version}" }
-                }
-                div { class: "topbar-actions",
-                    Link { to: Route::Me {}, class: "icon-btn", title: "Me",
-                        svg { fill: "none", stroke: "currentColor", stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round", view_box: "0 0 24 24",
-                            path { d: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" }
-                            circle { cx: "12", cy: "7", r: "4" }
-                        }
-                    }
-                }
-            }
+            TopBar { menu: false }
             div { class: "list",
                 for t in THREADS {
                     Link { key: "{t.id}", to: Route::ThreadPage { id: t.id.to_string() }, class: "row",
@@ -418,6 +419,35 @@ fn Settings() -> Element {
                     div { class: "row-main",
                         span { class: "row-title", "About" }
                         span { class: "row-sub", "License and copyright" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---- P-Menu: the multi-function page (full page, not an overlay) ----
+// The curated bounded destination list. Settings is the LAST entry of
+// the list — with nothing above it (today) it sits at the top, right
+// below the key. Future entries insert above it; the list stays
+// bounded; if it ever stopped being bounded, Settings would move to a
+// pinned footer row (never below an unbounded list).
+
+#[component]
+fn Menu() -> Element {
+    rsx! {
+        div { class: "page",
+            TopBar { menu: true }
+            div { class: "list",
+                Link { to: Route::Settings {}, class: "row",
+                    div { class: "row-icon",
+                        svg { fill: "none", stroke: "currentColor", stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round", view_box: "0 0 24 24",
+                            circle { cx: "12", cy: "12", r: "3" }
+                            path { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" }
+                        }
+                    }
+                    div { class: "row-main",
+                        span { class: "row-title", "Settings" }
                     }
                 }
             }
