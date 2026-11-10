@@ -577,7 +577,7 @@ fn RelayRow() -> Element {
         div { class: "paste-box",
             input {
                 class: "paste-area",
-                placeholder: "wss://… (the relay's browser face)",
+                placeholder: "https:// or wss:// (the relay's browser face)",
                 value: "{draft}",
                 oninput: move |e| {
                     err.set(String::new());
@@ -591,9 +591,18 @@ fn RelayRow() -> Element {
                 class: "copy-btn wide",
                 onclick: move |_| {
                     let url = draft.read().trim().to_string();
-                    let ok = url.starts_with("ws://") || url.starts_with("wss://");
+                    // The carrier ruling (principal, alpha.14): the
+                    // relay's browser face is gRPC-WEB over https;
+                    // the deployed relay speaks wss. Both encrypted
+                    // schemes are accepted — plain ws/http is not (a
+                    // https page could not open them anyway).
+                    let ok = url.starts_with("https://")
+                        || url.starts_with("wss://");
                     if !ok {
-                        err.set("the relay address must start with ws:// or wss://".to_string());
+                        err.set(
+                            "the relay address must start with https:// or wss://"
+                                .to_string(),
+                        );
                         return;
                     }
                     save_relay(&url);
