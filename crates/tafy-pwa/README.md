@@ -103,7 +103,7 @@ The shipped wasm must not leak the build machine's filesystem layout:
 
 ## compliance: licenses.html (A18)
 
-`crates/pwa/public/licenses.html` = cargo-about output (full
+`crates/tafy-pwa/public/licenses.html` = cargo-about output (full
 third-party license texts; linked from Settings). The page carries
 ONLY the open-source licenses (no version stamp — the version shows
 as small text beside the Home wordmark). REGENERATE before EVERY
@@ -111,7 +111,7 @@ deploy (every deploy is a distribution — A18):
 
 ```
 nix run nixpkgs#cargo-about -- generate --workspace about.hbs \
-  -o crates/pwa/public/licenses.html
+  -o crates/tafy-pwa/public/licenses.html
 ```
 
 Every deploy is a distribution (A18). Gate: `nix run

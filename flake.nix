@@ -83,9 +83,9 @@
               # nixpkgs rustc ships the wasm32-unknown-unknown std, so
               # `cargo check --target wasm32-unknown-unknown` and the
               # dx build both run inside this shell with no rustup.
-              # Build the web bundle with (runbook: crates/pwa/README.md):
+              # Build the web bundle with (runbook: crates/tafy-pwa/README.md):
               #   rm -rf ~/.cache/cargo/dx/tafy-pwa
-              #   dx build --release   # from crates/pwa
+              #   dx build --release   # from crates/tafy-pwa
             '';
           };
         }

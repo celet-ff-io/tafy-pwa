@@ -215,7 +215,7 @@ skip = [
   "sha2@0.10.9",
   # the dual getrandom/rand_core generations are a deliberate pin
   # (the dalek/rand_core 0.6 lineage rides getrandom 0.2; see
-  # crates/pwa/Cargo.toml's entropy note) — skip the older lines
+  # crates/tafy-pwa/Cargo.toml's entropy note) — skip the older lines
   "getrandom@0.2.17",
   "getrandom@0.3.4",
   "rand_core@0.6.4",
