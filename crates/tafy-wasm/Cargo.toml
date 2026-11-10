@@ -20,21 +20,20 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 log.workspace = true
 
-# -- the core (LPZ106; the zconn worktree is READ-ONLY for this
-# project). The deps go through the gitignored local-deps/ directory:
-# local-deps/zconn = a symlink to the zconn checkout AT WHATEVER
-# LOCATION THE MACHINE KEEPS IT — every machine's layout differs and
-# this one link is the only per-machine adaptation (the manifests
-# stay machine-independent, publish stays off). The link targets the
-# WHOLE zconn tree, not per-crate copies: cargo resolves a dep's
-# workspace inheritance by walking up the LINK path, so a bare-crate
-# link would fall into THIS workspace; the whole tree keeps zconn's
-# own root workspace in the walk. After a fresh clone, recreate it:
+# -- the core (LPZ106; read-only for this project). The deps go
+# through the gitignored local-deps/ directory: local-deps/zconn = a
+# LOCAL CLONE of the zconn repo pinned to 106's dev — OUR OWN clone,
+# never their worktree (their checkout moves across branches freely;
+# a link into it would silently consume WIP). Whole-tree clone, not
+# per-crate copies: cargo resolves a dep's workspace inheritance by
+# walking up the path, so the whole tree keeps zconn's own root
+# workspace in the walk. Manifests stay machine-independent; after a
+# fresh clone set it up (and refresh on 106's dev moves):
 #   mkdir -p local-deps && \
-#     ln -s /path/to/zconn local-deps/zconn
-# (The former R33 git-rev pin is retired by the principal, 2026-11-10:
-# the 107-style link replaces it — the consumed revision = whatever
-# the machine's zconn checkout carries, synced on 106's dev moves.)
+#     git clone -b dev /path/to/zconn local-deps/zconn
+# (The former R33 git-rev pin is retired by the principal,
+# 2026-11-10: this clone replaces it; sync = git -C local-deps/zconn
+# fetch origin dev && git -C local-deps/zconn checkout FETCH_HEAD.)
 # the path faces live in [workspace.dependencies] (paths are
 # root-relative there; a member-local path would resolve relative to
 # THIS crate's directory)

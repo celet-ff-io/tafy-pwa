@@ -94,9 +94,12 @@ The shipped wasm must not leak the build machine's filesystem layout:
    /build/.../ replacement; functionally inert — the manifest is
    build-time-only). Verify: `rg -a "/home" <wasm>` = no match.
 3. dependency manifests stay machine-independent: the 106 crates ride
-   the gitignored local-deps/zconn link (see tafy-wasm/Cargo.toml) —
-   after a fresh clone: `mkdir -p local-deps && ln -s /path/to/zconn
-   local-deps/zconn`.
+   the gitignored local-deps/zconn LOCAL CLONE pinned to 106's dev
+   (see tafy-wasm/Cargo.toml) — after a fresh clone:
+   `mkdir -p local-deps && git clone -b dev /path/to/zconn
+   local-deps/zconn`; refresh on 106's dev moves with
+   `git -C local-deps/zconn fetch origin dev && git -C
+   local-deps/zconn checkout FETCH_HEAD`.
 
 ## compliance: licenses.html (A18)
 
