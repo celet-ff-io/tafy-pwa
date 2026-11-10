@@ -358,8 +358,7 @@ fn peer_row_of(peer: &zconned_stdio_types::Peer) -> Option<PeerRow> {
         .map(|c| String::from_utf8_lossy(c).to_string())
         .collect::<Vec<_>>()
         .join(" ");
-    let card = base64::engine::general_purpose::STANDARD
-        .encode(peer.encode_to_vec());
+    let card = base64::engine::general_purpose::STANDARD.encode(peer.encode_to_vec());
     Some(PeerRow {
         fp,
         sign_algo: peer.sign_algo.clone(),

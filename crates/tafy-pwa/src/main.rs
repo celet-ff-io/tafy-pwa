@@ -276,13 +276,20 @@ fn thread_preview(id: &str) -> String {
 
 /// The Me page's fingerprint face: the card = base64(prost Peer);
 /// its sign_pub's first 8 bytes, hex pairs.
-fn self_fingerprint(card: &str) -> String {
+/// The self identity's DECODED face: the fingerprint is DISPLAY-ONLY
+/// (107's rule — never a copy source; the card is the copy unit) and
+/// the row states the algorithm pair (also 107's popup face).
+fn self_peer(card: &str) -> Option<zconned_stdio_types::Peer> {
     use base64::Engine as _;
     use prost::Message as _;
     base64::engine::general_purpose::STANDARD
         .decode(card.trim())
         .ok()
         .and_then(|bytes| zconned_stdio_types::Peer::decode(bytes.as_slice()).ok())
+}
+
+fn self_fingerprint(card: &str) -> String {
+    self_peer(card)
         .map(|peer| {
             let h: String = peer
                 .sign_pub
@@ -410,9 +417,8 @@ fn Me() -> Element {
                         div { class: "row",
                             div { class: "row-main",
                                 span { class: "row-title", "This device (this browser)" }
-                                span { class: "row-sub", "fingerprint {self_fingerprint(&card)}" }
+                                span { class: "row-sub", "{self_sub(&card)}" }
                             }
-                            CopyBtn { text: self_fingerprint(&card), label: "copy fp" }
                         }
                         div { class: "row",
                             div { class: "row-main",
@@ -436,6 +442,16 @@ fn Me() -> Element {
 // ---- the contacts face (107's W2 ruled UX, web-adapted: the
 // paste-in is the add channel — the browser clipboard is the
 // transport both ways; no file channels) ----
+
+/// The self row's sub: fingerprint + the algo pair (107's popup face;
+/// the fp is display-only — the card is the copy unit).
+fn self_sub(card: &str) -> String {
+    let mut sub = format!("fingerprint {}", self_fingerprint(card));
+    if let Some(p) = self_peer(card) {
+        sub.push_str(&format!("  \u{b7}  {} / {}", p.sign_algo, p.dh_algo));
+    }
+    sub
+}
 
 fn peer_sub(p: &core::PeerRow) -> String {
     let mut sub = format!("{} / {}", p.sign_algo, p.dh_algo);
