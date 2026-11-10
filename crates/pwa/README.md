@@ -66,8 +66,10 @@ before the build — else dead hashed files ride the bundle push.
 ## compliance: licenses.html (A18)
 
 `crates/pwa/public/licenses.html` = cargo-about output (full
-third-party license texts; linked from Settings). REGENERATE whenever
-the dependency set changes (Cargo.lock delta) BEFORE deploying:
+third-party license texts; linked from Settings). The page carries
+ONLY the open-source licenses (no version stamp — the version shows
+as small text beside the Home wordmark). REGENERATE before EVERY
+deploy (every deploy is a distribution — A18):
 
 ```
 nix run nixpkgs#cargo-about -- generate --workspace about.hbs \

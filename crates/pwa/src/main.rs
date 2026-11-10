@@ -5,7 +5,7 @@
 // buttons) over a free-growing thread list. Me page = identity hint
 // over the contacts list (variable, nothing below). Settings = its own
 // page. Thread = full-screen focused. The message level knows only
-// THREADS (消息链) — "会话" was a zconnor-connection term, dropped.
+// THREADS — "conversation" was a zconnor-connection term, dropped.
 // Mock seam: typed in-memory placeholders ONLY — the real wasm core
 // (LPZ106) plugs in behind this seam at the wiring phase. No network,
 // no crypto, no persistence (A16 mock era; A17 WASM-local architecture).
@@ -120,8 +120,8 @@ async fn instance_role() -> Instance {
 fn AlreadyRunning() -> Element {
     rsx! {
         div { class: "thread-stream",
-            p { class: "hint", "tAfY 已在另一个标签页/窗口运行 — 本页已停止（单写者保护）" }
-            p { class: "hint", "关闭另一个 tAfY 页面后刷新本页即可恢复" }
+            p { class: "hint", "tAfY is already running in another tab or window — this page is stopped (single-writer guard)" }
+            p { class: "hint", "Close the other tAfY page and refresh this one to continue" }
         }
     }
 }
@@ -204,13 +204,13 @@ const THREADS: &[Thread] = &[
     Thread {
         id: "alpha",
         title: "Alpha",
-        preview: "进行中 — 这条流是 typed mock",
+        preview: "In progress — this stream is a typed mock",
         unread: 1,
     },
     Thread {
         id: "beta",
         title: "Beta",
-        preview: "中继未配置",
+        preview: "Relay not configured",
         unread: 0,
     },
 ];
@@ -218,12 +218,12 @@ const THREADS: &[Thread] = &[
 const DEVICES: &[Device] = &[
     Device {
         id: "self",
-        name: "本机（此浏览器）",
+        name: "This device (this browser)",
         fingerprint: "···· ···· ···· ····",
     },
     Device {
         id: "peer",
-        name: "对端设备（示例）",
+        name: "Peer device (sample)",
         fingerprint: "···· ···· ···· ····",
     },
 ];
@@ -233,7 +233,7 @@ const EVENTS: &[Event] = &[
         kind: EventKind::SysFact,
         thread: "alpha",
         author: "",
-        text: "first-light 链路验证通过（mock）",
+        text: "first-light link verified (mock)",
         ts: 1794271800000,
     },
     Event {
@@ -246,22 +246,22 @@ const EVENTS: &[Event] = &[
     Event {
         kind: EventKind::Message,
         thread: "alpha",
-        author: "我",
-        text: "收到，链路正常",
+        author: "Me",
+        text: "Got it — the link is solid",
         ts: 1794271920000,
     },
     Event {
         kind: EventKind::Message,
         thread: "alpha",
         author: "Alpha",
-        text: "继续空壳实现",
+        text: "Continue the empty-shell implementation",
         ts: 1794271980000,
     },
     Event {
         kind: EventKind::Message,
         thread: "alpha",
-        author: "我",
-        text: "进行中 — 这条流是 typed mock",
+        author: "Me",
+        text: "In progress — this stream is a typed mock",
         ts: 1794272040000,
     },
 ];
@@ -292,10 +292,12 @@ fn Home() -> Element {
     rsx! {
         div { class: "page",
             header { class: "topbar",
-                h1 { class: "wordmark", "tAfY" }
-                // the deployed build id — the phone-visible answer to
-                // "is this the latest fixed version?"
-                span { class: "version", "v{version}" }
+                div { class: "brand",
+                    h1 { class: "wordmark", "tAfY" }
+                    // the deployed build id — the phone-visible answer
+                    // to "is this the latest fixed version?"
+                    span { class: "version", "v{version}" }
+                }
                 div { class: "topbar-actions",
                     Link { to: Route::Me {}, class: "icon-btn", title: "Me",
                         svg { fill: "none", stroke: "currentColor", stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round", view_box: "0 0 24 24",
@@ -303,7 +305,7 @@ fn Home() -> Element {
                             circle { cx: "12", cy: "7", r: "4" }
                         }
                     }
-                    Link { to: Route::Settings {}, class: "icon-btn", title: "设置",
+                    Link { to: Route::Settings {}, class: "icon-btn", title: "Settings",
                         svg { fill: "none", stroke: "currentColor", stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round", view_box: "0 0 24 24",
                             circle { cx: "12", cy: "12", r: "3" }
                             path { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" }
@@ -338,13 +340,13 @@ fn Me() -> Element {
                 Link { to: Route::Home {}, class: "back", "‹" }
                 strong { "Me" }
             }
-            p { class: "page-hint", "身份待 D2 轮（密钥模型）— 联系人：" }
+            p { class: "page-hint", "Identity pending the D2 round (key model) — contacts:" }
             div { class: "list",
                 for d in DEVICES {
                     div { key: "{d.id}", class: "row",
                         div { class: "row-main",
                             span { class: "row-title", "{d.name}" }
-                            span { class: "row-sub", "指纹 {d.fingerprint}" }
+                            span { class: "row-sub", "fingerprint {d.fingerprint}" }
                         }
                     }
                 }
@@ -361,25 +363,25 @@ fn Settings() -> Element {
         div { class: "page",
             header { class: "page-head",
                 Link { to: Route::Home {}, class: "back", "‹" }
-                strong { "设置" }
+                strong { "Settings" }
             }
             div { class: "list",
                 div { class: "row",
                     div { class: "row-main",
-                        span { class: "row-title", "身份" }
-                        span { class: "row-sub", "未配置 — 密钥模型待 D2 轮" }
+                        span { class: "row-title", "Identity" }
+                        span { class: "row-sub", "Not configured — key model pending the D2 round" }
                     }
                 }
                 div { class: "row",
                     div { class: "row-main",
-                        span { class: "row-title", "中继" }
-                        span { class: "row-sub", "未配置 — 等待 106 的中继浏览器面" }
+                        span { class: "row-title", "Relay" }
+                        span { class: "row-sub", "Not configured — waiting on 106's relay browser face" }
                     }
                 }
                 div { class: "row",
                     div { class: "row-main",
-                        span { class: "row-title", "关于" }
-                        span { class: "row-sub", "tAfY · first-light · mock 时代" }
+                        span { class: "row-title", "About" }
+                        span { class: "row-sub", "tAfY · first-light · mock era" }
                     }
                 }
                 // licenses.html = generated by cargo-about; regenerate
@@ -387,8 +389,8 @@ fn Settings() -> Element {
                 // (rules.md A18 — every deploy is a distribution).
                 a { class: "row", href: "./licenses.html",
                     div { class: "row-main",
-                        span { class: "row-title", "开源协议声明" }
-                        span { class: "row-sub", "第三方组件许可证全文" }
+                        span { class: "row-title", "Open-source licenses" }
+                        span { class: "row-sub", "Full license texts of third-party components" }
                     }
                 }
             }
@@ -406,19 +408,19 @@ fn ThreadPage(id: String) -> Element {
         div { class: "thread",
             header { class: "page-head",
                 Link { to: Route::Home {}, class: "back", "‹" }
-                strong { "{thread.map(|t| t.title).unwrap_or(\"未知线程\")}" }
+                strong { "{thread.map(|t| t.title).unwrap_or(\"Unknown thread\")}" }
             }
             div { class: "thread-stream",
                 if thread.is_none() {
-                    p { class: "hint", "未知线程 — 降级视图" }
+                    p { class: "hint", "Unknown thread — degraded view" }
                 } else if stream.is_empty() {
-                    p { class: "hint", "消息流待装填（等待 106 的 core）" }
+                    p { class: "hint", "Stream pending load (waiting on 106's core)" }
                 }
                 for e in stream {
                     match e.kind {
                         EventKind::Message => rsx! {
                             div { key: "{e.ts}", class: "msg",
-                                div { class: "msg-author", class: if e.author == "我" { "self" } else { "" }, "{e.author}" }
+                                div { class: "msg-author", class: if e.author == "Me" { "self" } else { "" }, "{e.author}" }
                                 div { class: "msg-text", "{e.text}" }
                                 div { class: "msg-ts", "{fmt_ts(e.ts)}" }
                             }
@@ -431,7 +433,7 @@ fn ThreadPage(id: String) -> Element {
             }
             form { class: "composer", onsubmit: move |e| e.prevent_default(),
                 div { class: "field",
-                    input { r#type: "text", placeholder: "空壳阶段不可发送", disabled: true }
+                    input { r#type: "text", placeholder: "Sending disabled in the shell stage", disabled: true }
                     button { class: "send", r#type: "submit", disabled: true, "↑" }
                 }
             }
@@ -445,8 +447,8 @@ fn ThreadPage(id: String) -> Element {
 fn NotFound(segments: Vec<String>) -> Element {
     rsx! {
         div { class: "thread-stream",
-            p { class: "hint", "未知页面 — 降级视图" }
-            p { class: "hint", "路径: /{segments.join(\"/\")}" }
+            p { class: "hint", "Unknown page — degraded view" }
+            p { class: "hint", "Path: /{segments.join(\"/\")}" }
         }
     }
 }
