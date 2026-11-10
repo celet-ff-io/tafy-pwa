@@ -53,3 +53,12 @@ env PATH="$WOBIN:$HOME/.local/bin:$PATH" "$DXBIN" build --release
 4. Phone: Android → install prompt; iOS Safari → share → Add to Home
    Screen. Offline shell via sw.js (cache-first, version-bumped file).
 5. Update = rebuild + push again; SW swaps the shell on refresh.
+
+## deploy gotcha: dx dist ACCUMULATES stale hashed assets
+
+`~/.cache/cargo/dx/tafy-pwa/release/web/public/assets/` keeps every
+historical hash-named js/wasm/css across builds (dx does not clean).
+The LIVE set per build = index.html + the entry js it references +
+the bg wasm + css named by the entry. When staging gh-pages, copy
+ONLY the referenced set (+ public/ files) — or clean the dist dir
+before the build — else dead hashed files ride the bundle push.
