@@ -3210,7 +3210,7 @@ dependencies = [
 
 [[package]]
 name = "tafy-pwa"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "dioxus",
  "js-sys",

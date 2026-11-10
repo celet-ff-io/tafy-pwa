@@ -65,6 +65,12 @@ the bg wasm THAT JS references + the css EMBEDDED IN THE WASM
 ONLY the referenced set (+ public/ files) — or clean the dist dir
 before the build — else dead hashed files ride the bundle push.
 
+GOTCHA (3): a Cargo.toml-ONLY change (e.g. the version bump) does NOT
+invalidate the dx build cache — it reports success and emits the OLD
+wasm. Touch a source file to force it. And DO NOT trust dist file
+mtimes (dx copies preserve internal mtimes) — identify the live set
+by the hash chain, never by time.
+
 ## compliance: licenses.html (A18)
 
 `crates/pwa/public/licenses.html` = cargo-about output (full

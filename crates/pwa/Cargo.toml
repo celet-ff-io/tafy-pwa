@@ -3,7 +3,7 @@ name = "tafy-pwa"
 # display discipline (A18 / principal 2026-11-11): every deploy bumps
 # this — deploy N = 0.1.0-alpha.N; the Settings version display and
 # the licenses.html stamp both come from this single source.
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
