@@ -1,5 +1,6 @@
 [workspace]
 members = ["crates/*"]
+exclude = ["local-deps"]
 resolver = "3"
 
 [workspace.package]
@@ -9,8 +10,8 @@ rust-version = "1.98"
 publish = false
 
 [workspace.dependencies]
-# -- in-workspace crates --
-tafy = { path = "crates/tafy" }
+# -- in-workspace crates: added as they land (tafy-wasm = the wasm
+# host of the zconned core; named by the principal, S2 Q3) --
 
 # -- generic infra (mirrored from the zconn workspace, 2026-11-09 scaffold) --
 tap = "1.0.1"
@@ -35,8 +36,22 @@ dirs = "7.0.0"
 # referenced once the pwa crate exists (P1); 0.8 line is alpha, stay on 0.7.
 dioxus = { version = "0.7.10", features = ["web"] }
 
+# -- S2 batch 1 (the i2c client face; consumed as path deps through
+# the gitignored local-deps/ link — see the tafy-wasm note) --
+prost = "0.14.4"
+base64 = "0.22"
+zconned-stdio-types = { path = "local-deps/zconn/crates/zconned-stdio-types" }
+zconned-material = { path = "local-deps/zconn/crates/zconned-material" }
+# the wasm host's face of the core (tafy-wasm inherits these)
+zconned = { path = "local-deps/zconn/crates/zconned", default-features = false }
+zconned-io-link = { path = "local-deps/zconn/crates/zconned-io-link" }
+protobuf-varint-deframer = { path = "local-deps/zconn/crates/protobuf-varint-deframer" }
+
 # DELIBERATELY ABSENT (do not add without the owning round):
 # - crypto deps (ed25519-dalek / x25519-dalek / sha3 / zeroize / ...):
-#   D2 round (browser key storage); the daemon carries zero keys contract.
-# - LPZ106 path/git deps (zconned-stdio-types / io-link / ...):
-#   D1 gate; LPZ106 is read-only for this project, deps enter with D1.
+#   the core carries them via the zconned dependency, not here.
+# - LPZ106 path deps via local-deps/ (the 107-style machine-link).
+#
+# 2026-11-10 (S2, principal Q2 ruling): the `tafy` bin stub is
+# RETIRED (scaffold placeholder, no product function; its tokio
+# full-features build was the workspace-root wasm-check blocker).

@@ -78,6 +78,26 @@ wasm. Touch a source file to force it. And DO NOT trust dist file
 mtimes (dx copies preserve internal mtimes) — identify the live set
 by the hash chain, never by time.
 
+## machine-path hygiene (bundle-only distribution, A16/A8)
+
+The shipped wasm must not leak the build machine's filesystem layout:
+
+1. rustc panic-location strings: build BOTH wasm crates with
+   `RUSTFLAGS="--remap-path-prefix=/home/$USER/.cargo/registry=/reg
+   --remap-path-prefix=/home/$USER/.cache/cargo=/cache
+   --remap-path-prefix=$HOME=/proj"` (adjust to the machine's real
+   layout — tafy-wasm's wasm-bindgen step uses the same env).
+2. the dx/manganis asset manifest embeds the ABSOLUTE asset source
+   path (rustc-independent; remap does not touch it) — run
+   `python3 tools/sanitise-wasm.py <dist>/assets/tafy-pwa_bg-*.wasm`
+   AFTER the dx build and BEFORE staging gh-pages (equal-length
+   /build/.../ replacement; functionally inert — the manifest is
+   build-time-only). Verify: `rg -a "/home" <wasm>` = no match.
+3. dependency manifests stay machine-independent: the 106 crates ride
+   the gitignored local-deps/zconn link (see tafy-wasm/Cargo.toml) —
+   after a fresh clone: `mkdir -p local-deps && ln -s /path/to/zconn
+   local-deps/zconn`.
+
 ## compliance: licenses.html (A18)
 
 `crates/pwa/public/licenses.html` = cargo-about output (full

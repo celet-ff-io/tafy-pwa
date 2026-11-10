@@ -1,0 +1,84 @@
+[package]
+name = "tafy-wasm"
+# The WASM HOST of the zconned core (S2, A17: no daemon — the core
+# runs in-browser). Named by the principal (S2 Q3, 2026-11-10).
+# Contents: the OPFS storage implementation (the 8-primitive Storage
+# SPI, protocol.md § The storage/carrier SPI), the gRPC-Web carrier
+# (batch 3), the Spawner bridge (spawn_local), and the worker
+# bootstrap that drives the core on a dedicated worker thread
+# (OPFS sync access handles are worker-only; the case table is in
+# design/s2-real-core/coarse.md §1a).
+version = "0.1.0-alpha.1"
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+log.workspace = true
+
+# -- the core (LPZ106; the zconn worktree is READ-ONLY for this
+# project). The deps go through the gitignored local-deps/ directory:
+# local-deps/zconn = a symlink to the zconn checkout AT WHATEVER
+# LOCATION THE MACHINE KEEPS IT — every machine's layout differs and
+# this one link is the only per-machine adaptation (the manifests
+# stay machine-independent, publish stays off). The link targets the
+# WHOLE zconn tree, not per-crate copies: cargo resolves a dep's
+# workspace inheritance by walking up the LINK path, so a bare-crate
+# link would fall into THIS workspace; the whole tree keeps zconn's
+# own root workspace in the walk. After a fresh clone, recreate it:
+#   mkdir -p local-deps && \
+#     ln -s /path/to/zconn local-deps/zconn
+# (The former R33 git-rev pin is retired by the principal, 2026-11-10:
+# the 107-style link replaces it — the consumed revision = whatever
+# the machine's zconn checkout carries, synced on 106's dev moves.)
+# the path faces live in [workspace.dependencies] (paths are
+# root-relative there; a member-local path would resolve relative to
+# THIS crate's directory)
+zconned.workspace = true
+prost = "0.14.4"
+zconned-stdio-types.workspace = true
+zconned-io-link.workspace = true
+protobuf-varint-deframer.workspace = true
+
+# -- wasm platform faces (versions pinned to the graph: wasm-bindgen
+# MUST stay =0.2.130, matching the wasm-bindgen-cli build pin) --
+wasm-bindgen = "=0.2.130"
+wasm-bindgen-futures = "=0.4.80"
+js-sys = "0.3.107"
+web-sys = { version = "0.3.107", features = [
+  # worker bootstrap + the i2c bridge
+  "Navigator",
+  "console",
+  "DedicatedWorkerGlobalScope",
+  "StorageManager",
+  "Worker",
+  "WorkerOptions",
+  "MessageEvent",
+  "MessagePort",
+  "MessageChannel",
+  # OPFS (sync access handles exist only inside a worker)
+  "FileSystemDirectoryHandle",
+  "FileSystemFileHandle",
+  "FileSystemGetDirectoryOptions",
+  "FileSystemGetFileOptions",
+  "FileSystemSyncAccessHandle",
+  "FileSystemWritableFileStream",
+  "FileSystemRemoveOptions",
+] }
+futures = "0.3"
+console_error_panic_hook = "0.1.7"
+
+# -- the runtime (the spike proved the current-thread runtime
+# executes spawn/mpsc/select/duplex on wasm32: design/s2-real-core/
+# coarse.md R2) --
+tokio = { version = "1.54.1", features = ["rt", "sync", "macros", "io-util"] }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3.50"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(wasm_bindgen_unstable)"] }

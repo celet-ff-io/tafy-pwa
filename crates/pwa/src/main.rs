@@ -17,14 +17,34 @@
 // legal content sits deep). Thread = full-screen focused (no menu
 // key). The message level knows only THREADS — "conversation" was
 // a zconnor-connection term, dropped.
-// Mock seam: typed in-memory placeholders ONLY — the real wasm core
-// (LPZ106) plugs in behind this seam at the wiring phase. No network,
-// no crypto, no persistence (A16 mock era; A17 WASM-local architecture).
+// The native face is TYPECHECK-ONLY (the app never runs natively —
+// A17: the core lives in a browser worker; spawn_local is a stub).
+// Dead-code truth therefore lives on the wasm32 check, where every
+// fn is reachable; silence the analysis here rather than gate the
+// shared code into copies.
+#![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+
+// Real-core era (S2 batch 1): the UI speaks the i2c frame protocol
+// to the wasm core (tafy-wasm, in a dedicated worker) via core.rs —
+// the mock seam below is RETIRED; the typed grammar (threads, the
+// message stream) stays as the UI's view model. (A17 WASM-local
+// architecture; A16 mock-era-only clause lifted by the principal.)
+
+mod core;
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::spawn_local;
 
 use dioxus::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
+// native check face (see core.rs): compile-only stub — the app never
+// runs natively (A17: the core lives in a browser worker).
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_local<F: std::future::Future<Output = ()> + 'static>(f: F) {
+    let _ = f;
+}
 
 fn main() {
     dioxus::launch(App);
@@ -161,6 +181,10 @@ fn App() -> Element {
     use_future(move || async move {
         role.set(Some(instance_role().await));
     });
+    // the core client boots once, on the primary instance only
+    use_effect(move || {
+        core::boot();
+    });
     rsx! {
         document::Link { rel: "stylesheet", href: asset!("/assets/main.css") }
         match role() {
@@ -171,115 +195,6 @@ fn App() -> Element {
         }
     }
 }
-
-// ---- mock seam (typed; replaced by the real core at wiring phase) ----
-
-#[derive(Clone, Debug)]
-struct Thread {
-    id: &'static str,
-    title: &'static str,
-    preview: &'static str,
-    unread: u8,
-}
-
-#[derive(Clone, Debug)]
-struct Device {
-    id: &'static str,
-    name: &'static str,
-    fingerprint: &'static str,
-}
-
-// mock seam: the real core's event stream swaps in behind this
-// grammar 1:1 at the wiring phase.
-/// Event kind in the interface-to-core grammar: chat message vs system
-/// fact.
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum EventKind {
-    /// a chat message (peer or self)
-    Message,
-    /// system fact (link state, join/leave, errors) -> sys card
-    SysFact,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct Event {
-    kind: EventKind,
-    /// owning thread id
-    thread: &'static str,
-    /// display name; empty = system (SysFact)
-    author: &'static str,
-    text: &'static str,
-    /// unix ms; rendered as its own text-level line
-    // layout rule: the ts line is STANDALONE text — never glued to the
-    // author line (principal ruling, 2026-11-10)
-    ts: u64,
-}
-
-const THREADS: &[Thread] = &[
-    Thread {
-        id: "alpha",
-        title: "Alpha",
-        preview: "In progress — this stream is a typed mock",
-        unread: 1,
-    },
-    Thread {
-        id: "beta",
-        title: "Beta",
-        preview: "Relay not configured",
-        unread: 0,
-    },
-];
-
-const DEVICES: &[Device] = &[
-    Device {
-        id: "self",
-        name: "This device (this browser)",
-        fingerprint: "···· ···· ···· ····",
-    },
-    Device {
-        id: "peer",
-        name: "Peer device (sample)",
-        fingerprint: "···· ···· ···· ····",
-    },
-];
-
-const EVENTS: &[Event] = &[
-    Event {
-        kind: EventKind::SysFact,
-        thread: "alpha",
-        author: "",
-        text: "first-light link verified (mock)",
-        ts: 1794271800000,
-    },
-    Event {
-        kind: EventKind::Message,
-        thread: "alpha",
-        author: "Alpha",
-        text: "first-light",
-        ts: 1794271860000,
-    },
-    Event {
-        kind: EventKind::Message,
-        thread: "alpha",
-        author: "Me",
-        text: "Got it — the link is solid",
-        ts: 1794271920000,
-    },
-    Event {
-        kind: EventKind::Message,
-        thread: "alpha",
-        author: "Alpha",
-        text: "Continue the empty-shell implementation",
-        ts: 1794271980000,
-    },
-    Event {
-        kind: EventKind::Message,
-        thread: "alpha",
-        author: "Me",
-        text: "In progress — this stream is a typed mock",
-        ts: 1794272040000,
-    },
-];
 
 /// Hand-rolled civil-from-days formatter (no chrono dep in the shell).
 fn fmt_ts(ms: u64) -> String {
@@ -296,6 +211,60 @@ fn fmt_ts(ms: u64) -> String {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let (hh, mm) = (rem / 3600, (rem % 3600) / 60);
     format!("{:04}-{:02}-{:02} {:02}:{:02}", y, m, d, hh, mm)
+}
+
+// ---- display helpers over the core state ----
+
+/// A thread id -> the display label: the digest's first 8 hex bytes
+/// in two groups (the full ref never reads well at row scale).
+fn short_ref(id: &str) -> String {
+    let digest = id.split(':').nth(3).unwrap_or("");
+    let h = &digest[..digest.len().min(16)];
+    match h.len() / 2 {
+        0 => id.to_string(),
+        n => h[..n * 2]
+            .as_bytes()
+            .chunks(4)
+            .map(|c| String::from_utf8_lossy(c).to_string())
+            .collect::<Vec<_>>()
+            .join(" "),
+    }
+}
+
+/// The Home row's sub line: the thread's last loaded message, else a
+/// quiet ref echo (the log loads lazily on open).
+fn thread_preview(id: &str) -> String {
+    core::CORE
+        .read()
+        .logs
+        .get(id)
+        .and_then(|rows| rows.last().map(|r| r.text.clone()))
+        .unwrap_or_else(|| "—".to_string())
+}
+
+/// The Me page's fingerprint face: the card = base64(prost Peer);
+/// its sign_pub's first 8 bytes, hex pairs.
+fn self_fingerprint(card: &str) -> String {
+    use base64::Engine as _;
+    use prost::Message as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(card.trim())
+        .ok()
+        .and_then(|bytes| zconned_stdio_types::Peer::decode(bytes.as_slice()).ok())
+        .map(|peer| {
+            let h: String = peer
+                .sign_pub
+                .iter()
+                .take(8)
+                .map(|b| format!("{b:02x}"))
+                .collect();
+            h.as_bytes()
+                .chunks(4)
+                .map(|c| String::from_utf8_lossy(c).to_string())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_else(|| "···· ···· ···· ····".to_string())
 }
 
 // ---- the topbar shared by list-level pages (role-split) ----
@@ -352,18 +321,38 @@ fn TopBar(menu: bool) -> Element {
 
 #[component]
 fn Home() -> Element {
+    let status = core::CORE.read().status.clone();
+    let threads = core::CORE.read().threads.clone();
+    let booting = status == core::Status::Booting;
+    let failed = match &status {
+        core::Status::Failed(e) => Some(e.clone()),
+        _ => None,
+    };
     rsx! {
         div { class: "page",
             TopBar { menu: false }
-            div { class: "list",
-                for t in THREADS {
-                    Link { key: "{t.id}", to: Route::ThreadPage { id: t.id.to_string() }, class: "row",
-                        div { class: "row-main",
-                            span { class: "row-title", "{t.title}" }
-                            span { class: "row-sub", "{t.preview}" }
+            if let Some(e) = failed {
+                p { class: "page-hint", "Core failed: {e}" }
+            } else if booting {
+                p { class: "page-hint", "Booting the core…" }
+            } else {
+                div { class: "list",
+                    if threads.is_empty() {
+                        // the honest empty state: the first thread
+                        // is born from its first message
+                        Link { to: Route::ThreadPage { id: "new".to_string() }, class: "row",
+                            div { class: "row-main",
+                                span { class: "row-title", "Start the first thread" }
+                                span { class: "row-sub", "It appears here once its first message lands" }
+                            }
                         }
-                        if t.unread > 0 {
-                            span { class: "badge", "{t.unread}" }
+                    }
+                    for t in threads {
+                        Link { key: "{t.id}", to: Route::ThreadPage { id: t.id.clone() }, class: "row",
+                            div { class: "row-main",
+                                span { class: "row-title", "{short_ref(&t.id)}" }
+                                span { class: "row-sub", "{thread_preview(&t.id)}" }
+                            }
                         }
                     }
                 }
@@ -382,16 +371,22 @@ fn Me() -> Element {
                 Link { to: Route::Home {}, class: "back", "‹" }
                 strong { "Me" }
             }
-            p { class: "page-hint", "Identity pending the D2 round (key model) — contacts:" }
-            div { class: "list",
-                for d in DEVICES {
-                    div { key: "{d.id}", class: "row",
-                        div { class: "row-main",
-                            span { class: "row-title", "{d.name}" }
-                            span { class: "row-sub", "fingerprint {d.fingerprint}" }
+            p { class: "page-hint", "Your identity card — contacts arrive with the carrier leg (batch 3):" }
+            match core::CORE.read().self_card.clone() {
+                Some(card) => rsx! {
+                    div { class: "list",
+                        div { class: "row",
+                            div { class: "row-main",
+                                span { class: "row-title", "This device (this browser)" }
+                                span { class: "row-sub", "fingerprint {self_fingerprint(&card)}" }
+                            }
                         }
+                        div { class: "card-blob", "{card}" }
                     }
-                }
+                },
+                None => rsx! {
+                    p { class: "page-hint", "Identity not generated yet — wait for the core to finish booting" }
+                },
             }
         }
     }
@@ -508,42 +503,95 @@ fn About() -> Element {
 }
 
 // ---- P-Thread: full-screen focused thread ----
+// id == "new" = the born-here flow: an empty focused page whose
+// composer starts a FRESH chain (cursor fresh — the core generates
+// the genesis parent); the commit receipt's entry ref BECOMES the
+// thread's id and the page navigates there. A real id = the thread
+// page proper: the log loads on mount (msg_threads_log_get); the
+// composer commits onto the thread's leaf.
 
 #[component]
 fn ThreadPage(id: String) -> Element {
-    let thread = THREADS.iter().find(|t| t.id == id);
-    let stream: Vec<&Event> = EVENTS.iter().filter(|e| e.thread == id).collect();
+    let nav = use_navigator();
+    let is_new = id == "new";
+
+    // mount: load the log once (real threads only)
+    let mut loaded = use_signal(|| false);
+    let id_for_load = id.clone();
+    use_effect(move || {
+        if !is_new && !loaded() {
+            loaded.set(true);
+            core::load_thread(id_for_load.clone());
+        }
+    });
+
+    // the composer: text -> the commit chain (single-flight); on a
+    // fresh commit the page navigates to the new thread's real id
+    let mut draft = use_signal(String::new);
+    let mut sending = use_signal(|| false);
+    let id_for_send = id.clone();
+    let submit = move |e: dioxus::prelude::Event<dioxus::prelude::FormData>| {
+        e.prevent_default();
+        let text = draft().trim().to_string();
+        if text.is_empty() || sending() {
+            return;
+        }
+        sending.set(true);
+        let id = id_for_send.clone();
+        let new = is_new;
+        spawn_local(async move {
+            let hex = if new { None } else { Some(id.as_str()) };
+            match core::commit(hex, &text).await {
+                // a fresh commit re-targets the page to the born thread
+                Ok(new_id) if new => {
+                    sending.set(false);
+                    draft.set(String::new());
+                    nav.replace(Route::ThreadPage { id: new_id });
+                }
+                Ok(_) => {
+                    sending.set(false);
+                    draft.set(String::new());
+                }
+                Err(_) => sending.set(false), // the error note rides CORE.error
+            }
+        });
+    };
+
     rsx! {
         div { class: "thread",
             header { class: "page-head",
                 Link { to: Route::Home {}, class: "back", "‹" }
-                strong { "{thread.map(|t| t.title).unwrap_or(\"Unknown thread\")}" }
+                strong { if is_new { "New thread" } else { "{short_ref(&id)}" } }
             }
             div { class: "thread-stream",
-                if thread.is_none() {
-                    p { class: "hint", "Unknown thread — degraded view" }
-                } else if stream.is_empty() {
-                    p { class: "hint", "Stream pending load (waiting on 106's core)" }
-                }
-                for e in stream {
-                    match e.kind {
-                        EventKind::Message => rsx! {
-                            div { key: "{e.ts}", class: "msg",
-                                div { class: "msg-author", class: if e.author == "Me" { "self" } else { "" }, "{e.author}" }
-                                div { class: "msg-text", "{e.text}" }
-                                div { class: "msg-ts", "{fmt_ts(e.ts)}" }
-                            }
-                        },
-                        EventKind::SysFact => rsx! {
-                            div { key: "{e.ts}", class: "sys", "{e.text} · {fmt_ts(e.ts)}" }
-                        },
+                if is_new {
+                    p { class: "hint", "Write the first message — it creates the thread" }
+                } else if let Some(rows) = core::CORE.read().logs.get(&id) {
+                    if rows.is_empty() {
+                        p { class: "hint", "Empty thread — say something" }
                     }
+                    for e in rows {
+                        div { key: "{e.ref_id}", class: "msg",
+                            div { class: "msg-author", class: if e.author == "Me" { "self" } else { "" }, "{e.author}" }
+                            div { class: "msg-text", "{e.text}" }
+                            div { class: "msg-ts", "{fmt_ts(e.ts_ms)}" }
+                        }
+                    }
+                } else {
+                    p { class: "hint", "Stream pending load…" }
+                }
+                if let Some(err) = core::CORE.read().error.clone() {
+                    div { class: "sys", "error: {err}" }
                 }
             }
-            form { class: "composer", onsubmit: move |e| e.prevent_default(),
+            form { class: "composer", onsubmit: submit,
                 div { class: "field",
-                    input { r#type: "text", placeholder: "Sending disabled in the shell stage", disabled: true }
-                    button { class: "send", r#type: "submit", disabled: true, "↑" }
+                    input { r#type: "text", placeholder: if is_new { "First message" } else { "Message" },
+                        value: "{draft}",
+                        oninput: move |e| draft.set(e.value()),
+                        disabled: "{sending}",
+                    }
+                    button { class: "send", r#type: "submit", disabled: "{sending}", "↑" }
                 }
             }
         }

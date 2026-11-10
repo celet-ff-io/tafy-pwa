@@ -5,7 +5,7 @@ name = "tafy-pwa"
 # one verification round (deployed or not); deploy ships the current
 # number. Single source: this field feeds env!("CARGO_PKG_VERSION")
 # (the version display); licenses.html carries no stamp (A18).
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.9"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,14 +15,31 @@ publish.workspace = true
 [dependencies]
 dioxus.workspace = true
 
+# Pure-Rust frame/state deps compile on BOTH faces: the client's
+# frame codec + state (core.rs) and the card helpers (main.rs) are
+# ungated Rust — they must typecheck under a plain `cargo check`
+# (native) too; the JS-only face stays under the wasm32 gate below.
+prost.workspace = true
+base64.workspace = true
+zconned-stdio-types.workspace = true
+zconned-material.workspace = true
+tokio = { version = "1.54.1", default-features = false, features = ["sync", "macros"] }
+
 # Browser single-instance guard (Web Locks). Versions pinned to what
 # the graph already carries: wasm-bindgen MUST stay =0.2.130 to match
 # the wasm-bindgen-cli build pin (see README.md).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-web-sys = { version = "0.3.107", features = ["Window", "Navigator"] }
+web-sys = { version = "0.3.107", features = ["Window", "Navigator", "Document", "Worker", "WorkerOptions", "MessageChannel", "MessagePort", "MessageEvent", "WorkerType"] }
 js-sys = "0.3.107"
 wasm-bindgen = "=0.2.130"
 wasm-bindgen-futures = "=0.4.80"
+tokio = { version = "1.54.1", default-features = false, features = ["sync", "macros"] }
+# the entropy face for wasm32: the zconn graph pulls BOTH getrandom
+# generations (0.2 via the dalek/rand_core 0.6 lineage, 0.4 current);
+# features are additive — these turn them on graph-wide (mirrors
+# zconned's own [target.wasm32] entries)
+getrandom = { version = "0.4", features = ["wasm_js"] }
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 
 [features]
 default = ["web"]
