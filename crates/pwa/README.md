@@ -52,7 +52,12 @@ env PATH="$WOBIN:$HOME/.local/bin:$PATH" "$DXBIN" build --release
 3. Enable Pages (repo settings → Pages → deploy from gh-pages branch).
 4. Phone: Android → install prompt; iOS Safari → share → Add to Home
    Screen. Offline shell via sw.js (cache-first, version-bumped file).
-5. Update = rebuild + push again; SW swaps the shell on refresh.
+5. Add `cp index.html 404.html` to the staging root (gh-pages
+   convention: the 404 body = our app entry — covers COLD deep links
+   with no SW yet; SW-controlled refreshes are covered by sw.js v2's
+   navigation fallback). MUST be redone every deploy (it embeds the
+   current hashed asset names).
+6. Update = rebuild + push again; SW swaps the shell on refresh.
 
 ## deploy gotcha: dx dist ACCUMULATES stale hashed assets
 
