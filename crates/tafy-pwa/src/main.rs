@@ -410,22 +410,21 @@ fn Me() -> Element {
                 Link { to: Route::Home {}, class: "back", "‹" }
                 strong { "Me" }
             }
-            p { class: "page-hint", "Your identity card — share it to be reachable:" }
+            p { class: "page-hint", "Your card:" }
             match core::CORE.read().self_card.clone() {
                 Some(card) => rsx! {
                     div { class: "list",
                         div { class: "row",
                             div { class: "row-main",
-                                span { class: "row-title", "This device (this browser)" }
+                                span { class: "row-title", "This device" }
                                 span { class: "row-sub", "{self_sub(&card)}" }
                             }
                         }
                         div { class: "row",
                             div { class: "row-main",
-                                span { class: "row-title", "Card (share this)" }
-                                span { class: "row-sub", "the full base64 travels via the clipboard, never the screen" }
+                                span { class: "row-title", "My card" }
                             }
-                            CopyBtn { text: card.clone(), label: "copy card" }
+                            CopyBtn { text: card.clone(), label: "copy" }
                         }
                         div { class: "card-blob", "{card}" }
                     }
@@ -476,7 +475,7 @@ fn Contacts() -> Element {
                         span { class: "row-title", "fingerprint {p.fp}" }
                         span { class: "row-sub", "{peer_sub(p)}" }
                     }
-                    CopyBtn { text: p.card.clone(), label: "copy card" }
+                    CopyBtn { text: p.card.clone(), label: "copy" }
                 }
             }
             div { class: "row row-btn",
@@ -486,14 +485,14 @@ fn Contacts() -> Element {
                         adding.set(!adding());
                         err.set(String::new());
                     },
-                    if *adding.read() { "− cancel add" } else { "+ add contact (paste their card)" }
+                    if *adding.read() { "Cancel" } else { "+ add contact" }
                 }
             }
             if *adding.read() {
                 div { class: "paste-box",
                     textarea {
                         class: "paste-area",
-                        placeholder: "Paste the counterpart's base64 card here",
+                        placeholder: "Paste their card here",
                         rows: "4",
                         value: "{paste}",
                         oninput: move |e| paste.set(e.value()),
@@ -516,7 +515,7 @@ fn Contacts() -> Element {
                                 }
                             });
                         },
-                        "Add contact"
+                        "Add"
                     }
                 }
             }
@@ -600,7 +599,7 @@ fn RelayRow() -> Element {
                     save_relay(&url);
                     draft.set(url);
                 },
-                "Save relay address"
+                "Save"
             }
         }
     }

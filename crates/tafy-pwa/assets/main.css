@@ -342,8 +342,9 @@ body {
   line-height: 1.5;
   color: var(--dim);
   word-break: break-all;
-  max-height: 4.5em;
-  overflow: hidden;
+  max-height: 5.5em;
+  overflow: auto; /* scrollable: the whole card is reachable on screen */
+  touch-action: pan-y;
 }
 
 /* the contacts face: the add affordance + the paste-in box (the
