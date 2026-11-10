@@ -12,8 +12,118 @@
 
 use dioxus::prelude::*;
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
 fn main() {
     dioxus::launch(App);
+}
+
+// ---- single-instance guard (R33 door: multi-tab; the wasm core is a
+// single writer over the browser storage pool — a second tab must not
+// boot a second core) ----
+// The guard is the browser Web Locks API: the first instance holds the
+// named lock for its lifetime; a second one boots the degrade view.
+// Mock-era note: today's shell is stateless, so the guard is scaffolded
+// now to make the invariant real before state exists.
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Instance {
+    Primary,
+    Secondary,
+}
+
+#[cfg(target_arch = "wasm32")]
+const CORE_LOCK: &str = "tafy-core";
+
+// Hand-rolled minimal LockManager binding: web-sys gates the typed
+// bindings behind `web_sys_unstable_apis`; a raw 3-line bind is
+// version-proof and needs no unstable cfg.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+unsafe extern "C" {
+    #[wasm_bindgen(js_name = "LockManager")]
+    type Locks;
+    #[wasm_bindgen(method, js_name = "request")]
+    fn request(
+        this: &Locks,
+        name: &str,
+        options: &js_sys::Object,
+        callback: &js_sys::Function,
+    ) -> js_sys::Promise;
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn instance_role() -> Instance {
+    use wasm_bindgen_futures::JsFuture;
+
+    // Pre-LockManager browsers (or non-window contexts) proceed
+    // unlocked: the guard is best-effort platform protection, never a
+    // bricking gate.
+    let Some(window) = web_sys::window() else {
+        return Instance::Primary;
+    };
+    let navigator = window.navigator();
+    let Ok(locks_val) = js_sys::Reflect::get(&navigator, &"locks".into()) else {
+        return Instance::Primary;
+    };
+    if !locks_val.is_object() {
+        return Instance::Primary;
+    }
+    let locks: Locks = locks_val.unchecked_into();
+
+    // `granted` settles TRUE only when the lock was granted (its
+    // resolver is captured and fired from the grant callback).
+    let resolver = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let r2 = resolver.clone();
+    let granted = js_sys::Promise::new(&mut |resolve, _| {
+        *r2.borrow_mut() = Some(resolve);
+    });
+
+    // Grant callback: fire `granted`, then return a promise that never
+    // settles — an unsettled callback return is what HOLDS the lock
+    // until the tab closes. `forget` = the holder lives as long as the
+    // lock does.
+    let r3 = resolver.clone();
+    let on_grant = wasm_bindgen::closure::Closure::<
+        dyn FnMut(JsValue) -> js_sys::Promise,
+    >::new(move |_lock: JsValue| {
+        if let Some(resolve) = r3.borrow_mut().take() {
+            let _ = resolve.call1(&JsValue::NULL, &JsValue::TRUE);
+        }
+        js_sys::Promise::new(&mut |_, _| {})
+    });
+    let opts = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(&opts, &"ifAvailable".into(), &JsValue::TRUE);
+    let request = locks.request(CORE_LOCK, &opts, on_grant.as_ref().unchecked_ref());
+    on_grant.forget();
+
+    // Race: granted => TRUE settles first; blocked => the request
+    // promise settles undefined (the callback never ran, the lock is
+    // held elsewhere).
+    let pair = js_sys::Array::of2(&granted, &request);
+    match JsFuture::from(js_sys::Promise::race(&pair.into())).await {
+        Ok(v) if v == JsValue::TRUE => Instance::Primary,
+        _ => Instance::Secondary,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn instance_role() -> Instance {
+    // native hosts (tests) are always the only instance
+    Instance::Primary
+}
+
+// the second instance's degrade view: it must NOT mount the app
+// (no router, no future core, no storage writes).
+#[component]
+fn AlreadyRunning() -> Element {
+    rsx! {
+        div { class: "thread-stream",
+            p { class: "hint", "tAfY 已在另一个标签页/窗口运行 — 本页已停止（单写者保护）" }
+            p { class: "hint", "关闭另一个 tAfY 页面后刷新本页即可恢复" }
+        }
+    }
 }
 
 #[derive(Clone, Routable, Debug, PartialEq)]
@@ -32,9 +142,18 @@ enum Route {
 
 #[component]
 fn App() -> Element {
+    let mut role = use_signal(|| None::<Instance>);
+    use_future(move || async move {
+        role.set(Some(instance_role().await));
+    });
     rsx! {
         document::Link { rel: "stylesheet", href: asset!("/assets/main.css") }
-        Router::<Route> {}
+        match role() {
+            // the sub-millisecond boot frame renders nothing
+            None => rsx! { {} },
+            Some(Instance::Primary) => rsx! { Router::<Route> {} },
+            Some(Instance::Secondary) => rsx! { AlreadyRunning {} },
+        }
     }
 }
 

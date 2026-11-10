@@ -3213,6 +3213,10 @@ name = "tafy-pwa"
 version = "0.1.0-alpha"
 dependencies = [
  "dioxus",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
