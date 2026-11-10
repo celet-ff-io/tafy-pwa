@@ -50,10 +50,7 @@ fn copy_to_clipboard(t: String) {
     spawn_local(async move {
         if let Some(window) = web_sys::window() {
             let clipboard = window.navigator().clipboard();
-            let _ = wasm_bindgen_futures::JsFuture::from(
-                clipboard.write_text(&t),
-            )
-            .await;
+            let _ = wasm_bindgen_futures::JsFuture::from(clipboard.write_text(&t)).await;
         }
     });
 }
@@ -63,6 +60,17 @@ fn copy_to_clipboard(t: String) {
 fn copy_to_clipboard(t: String) {
     let _ = t;
 }
+
+#[cfg(target_arch = "wasm32")]
+fn save_relay(url: &str) {
+    if let Some(w) = web_sys::window()
+        && let Ok(Some(storage)) = w.local_storage()
+    {
+        let _ = storage.set_item(RELAY_KEY, url);
+    }
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn save_relay(_url: &str) {}
 // native check face (see core.rs): compile-only stub — the app never
 // runs natively (A17: the core lives in a browser worker).
 #[cfg(not(target_arch = "wasm32"))]
@@ -395,7 +403,7 @@ fn Me() -> Element {
                 Link { to: Route::Home {}, class: "back", "‹" }
                 strong { "Me" }
             }
-            p { class: "page-hint", "Your identity card — contacts arrive with the carrier leg (batch 3):" }
+            p { class: "page-hint", "Your identity card — share it to be reachable:" }
             match core::CORE.read().self_card.clone() {
                 Some(card) => rsx! {
                     div { class: "list",
@@ -420,6 +428,82 @@ fn Me() -> Element {
                     p { class: "page-hint", "Identity not generated yet — wait for the core to finish booting" }
                 },
             }
+            Contacts {}
+        }
+    }
+}
+
+// ---- the contacts face (107's W2 ruled UX, web-adapted: the
+// paste-in is the add channel — the browser clipboard is the
+// transport both ways; no file channels) ----
+
+fn peer_sub(p: &core::PeerRow) -> String {
+    let mut sub = format!("{} / {}", p.sign_algo, p.dh_algo);
+    if !p.endpoints.is_empty() {
+        sub.push_str(&format!("  \u{b7}  {}", p.endpoints.join(", ")));
+    }
+    sub
+}
+
+#[component]
+fn Contacts() -> Element {
+    let mut adding = use_signal(|| false);
+    let mut paste = use_signal(String::new);
+    let mut err = use_signal(String::new);
+    let peers = core::CORE.read().peers.clone();
+    rsx! {
+        p { class: "page-hint", "Contacts ({peers.len()}):" }
+        div { class: "list",
+            for p in peers.iter() {
+                div { class: "row",
+                    div { class: "row-main",
+                        span { class: "row-title", "fingerprint {p.fp}" }
+                        span { class: "row-sub", "{peer_sub(p)}" }
+                    }
+                    CopyBtn { text: p.card.clone(), label: "copy card" }
+                }
+            }
+            div { class: "row row-btn",
+                button {
+                    class: "copy-btn wide",
+                    onclick: move |_| {
+                        adding.set(!adding());
+                        err.set(String::new());
+                    },
+                    if *adding.read() { "− cancel add" } else { "+ add contact (paste their card)" }
+                }
+            }
+            if *adding.read() {
+                div { class: "paste-box",
+                    textarea {
+                        class: "paste-area",
+                        placeholder: "Paste the counterpart's base64 card here",
+                        rows: "4",
+                        value: "{paste}",
+                        oninput: move |e| paste.set(e.value()),
+                    }
+                    if !err.read().is_empty() {
+                        p { class: "paste-err", "{err}" }
+                    }
+                    button {
+                        class: "copy-btn wide",
+                        disabled: paste.read().trim().is_empty(),
+                        onclick: move |_| {
+                            let card = paste.read().trim().to_string();
+                            spawn_local(async move {
+                                match core::add_peer(&card).await {
+                                    Ok(_) => {
+                                        paste.set(String::new());
+                                        adding.set(false);
+                                    }
+                                    Err(e) => err.set(e),
+                                }
+                            });
+                        },
+                        "Add contact"
+                    }
+                }
+            }
         }
     }
 }
@@ -443,7 +527,68 @@ fn CopyBtn(text: String, label: String) -> Element {
     }
 }
 
-// ---- P-Settings: static rows ----
+// ---- P-Settings: the node's own configuration + static rows ----
+
+// the relay address: the node's own configuration (the self card
+// carries empty endpoints — the proto's stated rule). The setting
+// lives in localStorage (per-browser origin, ours); the carrier leg
+// (batch 3) reads it when assembling the Transport.
+static RELAY_KEY: &str = "tafy.relay_url";
+
+#[cfg(target_arch = "wasm32")]
+fn relay_saved() -> String {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|s| s.get_item(RELAY_KEY).ok().flatten())
+        .unwrap_or_default()
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn relay_saved() -> String {
+    String::new()
+}
+
+#[component]
+fn RelayRow() -> Element {
+    let mut draft = use_signal(relay_saved);
+    let mut err = use_signal(String::new);
+    rsx! {
+        div { class: "row row-config",
+            div { class: "row-main",
+                span { class: "row-title", "Relay address" }
+                span { class: "row-sub",
+                    if draft.read().is_empty() { "Not set — the carrier leg will need it" } else { "{draft}" } }
+            }
+        }
+        div { class: "paste-box",
+            input {
+                class: "paste-area",
+                placeholder: "wss://… (the relay's browser face)",
+                value: "{draft}",
+                oninput: move |e| {
+                    err.set(String::new());
+                    draft.set(e.value());
+                },
+            }
+            if !err.read().is_empty() {
+                p { class: "paste-err", "{err}" }
+            }
+            button {
+                class: "copy-btn wide",
+                onclick: move |_| {
+                    let url = draft.read().trim().to_string();
+                    let ok = url.starts_with("ws://") || url.starts_with("wss://");
+                    if !ok {
+                        err.set("the relay address must start with ws:// or wss://".to_string());
+                        return;
+                    }
+                    save_relay(&url);
+                    draft.set(url);
+                },
+                "Save relay address"
+            }
+        }
+    }
+}
 
 #[component]
 fn Settings() -> Element {
@@ -467,12 +612,7 @@ fn Settings() -> Element {
                         span { class: "row-sub", "Not configured — key model pending the D2 round" }
                     }
                 }
-                div { class: "row",
-                    div { class: "row-main",
-                        span { class: "row-title", "Relay" }
-                        span { class: "row-sub", "Not configured — waiting on 106's relay browser face" }
-                    }
-                }
+                RelayRow {}
                 Link { to: Route::About {}, class: "row",
                     div { class: "row-main",
                         span { class: "row-title", "About" }

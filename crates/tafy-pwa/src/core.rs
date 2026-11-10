@@ -71,10 +71,24 @@ pub struct LogRow {
     pub ts_ms: u64,
 }
 
+/// One contact (a Peer record's display face; 107's W2, web-adapted).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PeerRow {
+    /// the display fingerprint: sign_pub's first 8 bytes, hex pairs
+    pub fp: String,
+    pub sign_algo: String,
+    pub dh_algo: String,
+    /// the peer's endpoint hints, verbatim
+    pub endpoints: Vec<String>,
+    /// the canonical single-line base64 (the shareable copy source)
+    pub card: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CoreState {
     pub status: Status,
     pub self_card: Option<String>,
+    pub peers: Vec<PeerRow>,
     pub threads: Vec<ThreadRow>,
     /// thread id -> fetched log (oldest first as the core states it)
     pub logs: HashMap<String, Vec<LogRow>>,
@@ -177,6 +191,7 @@ enum AnswerKind {
     MsgThreadsPush,
     MsgThreadsLogPush,
     SelfPush,
+    PeersPush,
 }
 
 fn answer_kind(f: &OutgoingFrame) -> Option<AnswerKind> {
@@ -188,6 +203,7 @@ fn answer_kind(f: &OutgoingFrame) -> Option<AnswerKind> {
         F::MsgThreadsPush(_) => Some(AnswerKind::MsgThreadsPush),
         F::MsgThreadsLogPush(_) => Some(AnswerKind::MsgThreadsLogPush),
         F::SelfPush(_) => Some(AnswerKind::SelfPush),
+        F::PeersPush(_) => Some(AnswerKind::PeersPush),
         _ => None,
     }
 }
@@ -328,10 +344,44 @@ fn error_of(f: &OutgoingFrame) -> Option<(String, String)> {
     }
 }
 
+fn peer_row_of(peer: &zconned_stdio_types::Peer) -> Option<PeerRow> {
+    use base64::Engine as _;
+    let fp: String = peer
+        .sign_pub
+        .iter()
+        .take(8)
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let fp = fp
+        .as_bytes()
+        .chunks(4)
+        .map(|c| String::from_utf8_lossy(c).to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let card = base64::engine::general_purpose::STANDARD
+        .encode(peer.encode_to_vec());
+    Some(PeerRow {
+        fp,
+        sign_algo: peer.sign_algo.clone(),
+        dh_algo: peer.dh_algo.clone(),
+        endpoints: peer.endpoints.clone(),
+        card,
+    })
+}
+
+fn set_peers(st: &mut CoreState, peers: &[zconned_stdio_types::Peer]) {
+    st.peers = peers.iter().filter_map(peer_row_of).collect();
+}
+
 /// Unsolicited frames: the statement bus. Day one = commit receipts
-/// for ops whose reply consumer is gone + batch-3 arrivals later.
+/// for ops whose reply consumer is gone + PeersPush (dual-role: the
+/// peer_set receipt AND the resting set) + batch-3 arrivals later.
 fn route_statement(f: OutgoingFrame) {
     use zconned_stdio_types::outgoing_frame::Frame as F;
+    if let F::PeersPush(p) = f.frame.as_ref().unwrap() {
+        set_peers(&mut CORE.write(), &p.peers);
+        return;
+    }
     if let F::MsgAdded(a) = f.frame.as_ref().unwrap()
         && let Some(entry) = a.entry.as_ref()
     {
@@ -501,6 +551,18 @@ async fn run_client() -> Result<(), String> {
             }
         }
     }
+    if let Ok(frames) = request(
+        incoming(M::PeersGet(zconned_stdio_types::PeersGet {})),
+        Expect::One(AnswerKind::PeersPush),
+    )
+    .await
+    {
+        for f in frames {
+            if let Some(zconned_stdio_types::outgoing_frame::Frame::PeersPush(p)) = f.frame {
+                set_peers(&mut CORE.write(), &p.peers);
+            }
+        }
+    }
     trace(&format!("seeded; threads={}", CORE.read().threads.len()));
     if CORE.read().status == Status::Booting {
         CORE.write().status = Status::Ready;
@@ -552,6 +614,49 @@ pub async fn self_card() -> Result<String, String> {
         }
     }
     Err("self_get answered without a card".to_string())
+}
+
+/// peers_get -> the resting send-target set (seeded at boot; also
+/// kept as the op API alongside its statement route).
+#[allow(dead_code)]
+pub async fn peers() -> Result<Vec<PeerRow>, String> {
+    let frames = request(
+        incoming(M::PeersGet(zconned_stdio_types::PeersGet {})),
+        Expect::One(AnswerKind::PeersPush),
+    )
+    .await?;
+    for f in frames {
+        if let Some(zconned_stdio_types::outgoing_frame::Frame::PeersPush(p)) = f.frame {
+            let mut st = CORE.write();
+            set_peers(&mut st, &p.peers);
+            return Ok(st.peers.clone());
+        }
+    }
+    Err("peers_get answered without a set".to_string())
+}
+
+/// peer_set{card} from a pasted card: the canonical single-line
+/// base64 goes to the core VERBATIM — the core decodes it, verifies
+/// the signature and derives the anchor (the interface never parses
+/// key material; 107's ruled UX, now the proto's card field).
+/// The receipt = the whole resting set (PeersPush, dual-role).
+pub async fn add_peer(card_b64: &str) -> Result<Vec<PeerRow>, String> {
+    let frames = request(
+        incoming(M::PeerSet(zconned_stdio_types::PeerSet {
+            peer: None,
+            card: Some(card_b64.trim().to_string()),
+        })),
+        Expect::One(AnswerKind::PeersPush),
+    )
+    .await?;
+    for f in frames {
+        if let Some(zconned_stdio_types::outgoing_frame::Frame::PeersPush(p)) = f.frame {
+            let mut st = CORE.write();
+            set_peers(&mut st, &p.peers);
+            return Ok(st.peers.clone());
+        }
+    }
+    Err("peer_set answered without a set".to_string())
 }
 
 /// msg_threads_get -> the thread list (seeded at boot; kept as the

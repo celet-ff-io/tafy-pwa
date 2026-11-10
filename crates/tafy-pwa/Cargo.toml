@@ -5,7 +5,7 @@ name = "tafy-pwa"
 # one verification round (deployed or not); deploy ships the current
 # number. Single source: this field feeds env!("CARGO_PKG_VERSION")
 # (the version display); licenses.html carries no stamp (A18).
-version = "0.1.0-alpha.11"
+version = "0.1.0-alpha.12"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -29,7 +29,7 @@ tokio = { version = "1.54.1", default-features = false, features = ["sync", "mac
 # the graph already carries: wasm-bindgen MUST stay =0.2.130 to match
 # the wasm-bindgen-cli build pin (see README.md).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-web-sys = { version = "0.3.107", features = ["Window", "Navigator", "Document", "Worker", "WorkerOptions", "MessageChannel", "MessagePort", "MessageEvent", "WorkerType", "Clipboard"] }
+web-sys = { version = "0.3.107", features = ["Window", "Navigator", "Document", "Worker", "WorkerOptions", "MessageChannel", "MessagePort", "MessageEvent", "WorkerType", "Clipboard", "Storage"] }
 js-sys = "0.3.107"
 wasm-bindgen = "=0.2.130"
 wasm-bindgen-futures = "=0.4.80"
