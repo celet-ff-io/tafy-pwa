@@ -62,3 +62,19 @@ The LIVE set per build = index.html + the entry js it references +
 the bg wasm + css named by the entry. When staging gh-pages, copy
 ONLY the referenced set (+ public/ files) — or clean the dist dir
 before the build — else dead hashed files ride the bundle push.
+
+## compliance: licenses.html (A18)
+
+`crates/pwa/public/licenses.html` = cargo-about output (full
+third-party license texts; linked from Settings). REGENERATE whenever
+the dependency set changes (Cargo.lock delta) BEFORE deploying:
+
+```
+nix run nixpkgs#cargo-about -- generate --workspace about.hbs \
+  -o crates/pwa/public/licenses.html
+```
+
+Every deploy is a distribution (A18). Gate: `nix run
+nixpkgs#cargo-deny -- check licenses bans` (deny.toml adapted from
+LPZ106; our own unpublished crates are skipped via private.ignore —
+they carry no license field on purpose = all rights reserved).
