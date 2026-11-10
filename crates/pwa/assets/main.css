@@ -66,6 +66,13 @@ body {
   letter-spacing: 0.4px;
 }
 
+/* the deployed build id, small and dim beside the wordmark */
+.topbar .version {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .topbar-actions {
   display: flex;
   gap: 6px;
