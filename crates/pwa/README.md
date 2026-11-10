@@ -20,9 +20,11 @@
 ## Build
 
 ```sh
-cd crates/pwa
+# -p targets the package (same shorthand as cargo); no cd needed.
+# From the workspace root dx refuses to guess (two bin crates: tafy,
+# tafy-pwa) — always pass -p tafy-pwa explicitly.
 rm -rf ~/.cache/cargo/dx/tafy-pwa   # dx does NOT clean stale hashed assets
-env PATH="$WOBIN:$HOME/.local/bin:$PATH" "$DXBIN" build --release
+env PATH="$WOBIN:$HOME/.local/bin:$PATH" "$DXBIN" build --release -p tafy-pwa
 # output: ~/.cache/cargo/dx/tafy-pwa/release/web/public
 ```
 
