@@ -57,9 +57,10 @@ struct Device {
 
 // mock seam: the real core's event stream swaps in behind this
 // grammar 1:1 at the wiring phase.
-/// Event kind in the i2c grammar: chat message vs system fact.
+/// Event kind in the interface-to-core grammar: chat message vs system
+/// fact.
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Kind {
+enum EventKind {
     /// a chat message (peer or self)
     Message,
     /// system fact (link state, join/leave, errors) -> sys card
@@ -68,7 +69,7 @@ enum Kind {
 
 #[derive(Clone, Copy, Debug)]
 struct Event {
-    kind: Kind,
+    kind: EventKind,
     /// owning thread id
     thread: &'static str,
     /// display name; empty = system (SysFact)
@@ -110,35 +111,35 @@ const DEVICES: &[Device] = &[
 
 const EVENTS: &[Event] = &[
     Event {
-        kind: Kind::SysFact,
+        kind: EventKind::SysFact,
         thread: "alpha",
         author: "",
         text: "first-light 链路验证通过（mock）",
         ts: 1794271800000,
     },
     Event {
-        kind: Kind::Message,
+        kind: EventKind::Message,
         thread: "alpha",
         author: "Alpha",
         text: "first-light",
         ts: 1794271860000,
     },
     Event {
-        kind: Kind::Message,
+        kind: EventKind::Message,
         thread: "alpha",
         author: "我",
         text: "收到，链路正常",
         ts: 1794271920000,
     },
     Event {
-        kind: Kind::Message,
+        kind: EventKind::Message,
         thread: "alpha",
         author: "Alpha",
         text: "继续空壳实现",
         ts: 1794271980000,
     },
     Event {
-        kind: Kind::Message,
+        kind: EventKind::Message,
         thread: "alpha",
         author: "我",
         text: "进行中 — 这条流是 typed mock",
@@ -282,14 +283,14 @@ fn ThreadPage(id: String) -> Element {
                 }
                 for e in stream {
                     match e.kind {
-                        Kind::Message => rsx! {
+                        EventKind::Message => rsx! {
                             div { key: "{e.ts}", class: "msg",
                                 div { class: "msg-author", class: if e.author == "我" { "self" } else { "" }, "{e.author}" }
                                 div { class: "msg-text", "{e.text}" }
                                 div { class: "msg-ts", "{fmt_ts(e.ts)}" }
                             }
                         },
-                        Kind::SysFact => rsx! {
+                        EventKind::SysFact => rsx! {
                             div { key: "{e.ts}", class: "sys", "{e.text} · {fmt_ts(e.ts)}" }
                         },
                     }
