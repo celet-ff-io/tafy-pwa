@@ -103,8 +103,8 @@ fn relay_status_class(s: RelayStatus) -> &'static str {
 
 #[cfg(target_arch = "wasm32")]
 fn probe_relay(url: String, mut st: dioxus::prelude::Signal<RelayStatus>) {
-    use wasm_bindgen::prelude::Closure;
     use wasm_bindgen::JsCast;
+    use wasm_bindgen::prelude::Closure;
     use wasm_bindgen_futures::JsFuture;
     if url.starts_with("wss://") {
         match web_sys::WebSocket::new(&url) {
@@ -117,13 +117,15 @@ fn probe_relay(url: String, mut st: dioxus::prelude::Signal<RelayStatus>) {
                     // the socket — this is a probe, not the carrier
                     ws_open.close().ok();
                     st_open.set(RelayStatus::Reachable);
-                }) as Box<dyn FnMut(wasm_bindgen::JsValue)>);
+                })
+                    as Box<dyn FnMut(wasm_bindgen::JsValue)>);
                 ws.set_onopen(Some(onopen.as_ref().unchecked_ref()));
                 onopen.forget(); // page-lifetime probe
                 let mut st_err = st;
                 let onerr = wasm_bindgen::prelude::Closure::wrap(Box::new(move |_| {
                     st_err.set(RelayStatus::Unreachable);
-                }) as Box<dyn FnMut(wasm_bindgen::JsValue)>);
+                })
+                    as Box<dyn FnMut(wasm_bindgen::JsValue)>);
                 ws.set_onerror(Some(onerr.as_ref().unchecked_ref()));
                 ws.set_onclose(Some(onerr.as_ref().unchecked_ref()));
                 onerr.forget();
@@ -138,8 +140,7 @@ fn probe_relay(url: String, mut st: dioxus::prelude::Signal<RelayStatus>) {
         opts.set_mode(web_sys::RequestMode::NoCors);
         st.set(RelayStatus::Checking);
         if let Some(w) = web_sys::window() {
-            let req = web_sys::Request::new_with_str_and_init(&url, &opts)
-                .expect("probe request");
+            let req = web_sys::Request::new_with_str_and_init(&url, &opts).expect("probe request");
             let fut = JsFuture::from(w.fetch_with_request(&req));
             spawn_local(async move {
                 match fut.await {
@@ -830,7 +831,7 @@ fn ThreadPage(id: String) -> Element {
     // the relay status face (107-style): a reachability probe plus
     // the honest send-path state — the carrier leg is NOT wired yet,
     // so messages stay local regardless of the probe's result
-    let mut relay_status = use_signal(|| {
+    let relay_status = use_signal(|| {
         if relay_saved().trim().is_empty() {
             RelayStatus::NotSet
         } else {

@@ -1,0 +1,32 @@
+[package]
+name = "tafy-carrier"
+# The browser leg of the relay conversation (batch 3): the
+# Carrier/MailSession impls over gRPC-Web (tonic-web-wasm-client),
+# the Send bridge via send_wrapper (single-threaded executor).
+version = "0.1.0-alpha.1"
+authors.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The carrier seam's own face (zconned, default-features off: the
+# wasm graph keeps hyper/mio out — the SPI note).
+zconned = { workspace = true }
+zconnor-mail-types.workspace = true
+futures = { version = "0.3", default-features = false, features = ["std"] }
+prost.workspace = true
+tonic = { version = "0.14.9", default-features = false, features = [
+    "codegen",
+] }
+# The browser leg's gRPC-Web client (tonic 0.14-matched; wasm-clean
+# deps — no hyper/mio). The protocol's ruled browser envelope (R32).
+tonic-web-wasm-client = "0.9.2"
+# The Send bridge: js-bound futures are !Send; the mail-session
+# traits promise Send — honored via the single-threaded executor
+# (the SPI note's SendWrapper-class pattern).
+send_wrapper = { version = "0.6", features = ["futures"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# keep the native check compiling (the crate never runs natively)
+zconned = { workspace = true }

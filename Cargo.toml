@@ -45,6 +45,9 @@ zconned-material = { path = "local-deps/zconn/crates/zconned-material" }
 # the wasm host's face of the core (tafy-wasm inherits these)
 zconned = { path = "local-deps/zconn/crates/zconned", default-features = false }
 zconned-io-link = { path = "local-deps/zconn/crates/zconned-io-link" }
+# the relay mail vocabulary (domain-1/2 wire types + the generated
+# MailboxServiceClient; codegen-only — the channel is the consumer's)
+zconnor-mail-types = { path = "local-deps/zconn/crates/zconnor-mail-types" }
 protobuf-varint-deframer = { path = "local-deps/zconn/crates/protobuf-varint-deframer" }
 
 # DELIBERATELY ABSENT (do not add without the owning round):
