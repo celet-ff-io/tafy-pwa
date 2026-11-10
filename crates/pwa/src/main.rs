@@ -401,10 +401,16 @@ fn Me() -> Element {
 
 #[component]
 fn Settings() -> Element {
+    // back = replace, not push: Home in BOTH the tap and the system
+    // swipe, without stacking a second Home entry (principal, alpha.7)
+    let nav = use_navigator();
     rsx! {
         div { class: "page",
             header { class: "page-head",
-                Link { to: Route::Home {}, class: "back", "‹" }
+                a { class: "back", href: "#", onclick: move |e| {
+                    e.prevent_default();
+                    nav.replace(Route::Home {});
+                }, "‹" }
                 strong { "Settings" }
             }
             div { class: "list",
@@ -440,11 +446,20 @@ fn Settings() -> Element {
 
 #[component]
 fn Menu() -> Element {
+    // dioxus 0.7's Link has no `replace` prop (Navigator does): the
+    // row is a plain anchor driving navigator.replace — the history
+    // stack must read [home, settings] so the system swipe (left
+    // edge = history back) returns HOME, matching the common-user
+    // and system-gesture understanding (principal, alpha.7)
+    let nav = use_navigator();
     rsx! {
         div { class: "page",
             TopBar { menu: true }
             div { class: "list",
-                Link { to: Route::Settings {}, class: "row",
+                a { class: "row", href: "#", onclick: move |e| {
+                    e.prevent_default();
+                    nav.replace(Route::Settings {});
+                },
                     // one lead group so .row's space-between can't
                     // spread icon and text to opposite edges
                     div { class: "row-lead",
