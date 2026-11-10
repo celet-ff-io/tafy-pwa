@@ -93,7 +93,7 @@ git-fetch-with-cli = false
 # List of explicitly allowed licenses
 # See https://spdx.org/licenses/ for list of possible licenses
 # [possible values: any SPDX 3.11 short identifier (+ optional exception)].
-allow = ["MIT", "Apache-2.0", "Unicode-3.0", "ISC", "Zlib", "BSD-3-Clause", "CC0-1.0"]
+allow = ["MIT", "Apache-2.0", "Unicode-3.0", "ISC", "Zlib", "CC0-1.0"]
 # The confidence threshold for detecting a license from license text.
 # The higher the value, the more closely the license text must be to the
 # canonical license text of a valid SPDX license file.
@@ -202,22 +202,11 @@ deny = [
 skip = [
   "syn@2.0.119",
   "unicode-width@0.1.14",
-  "hashbrown@0.15.5",
-  { crate = "block-buffer@0.10.4", reason = "the RustCrypto 0.10-era stack (aead 0.5 / chacha20poly1305); lifts when its digest-0.11 generation ships" },
-  { crate = "crypto-common@0.1.7", reason = "the RustCrypto 0.10-era stack (aead 0.5)" },
-  { crate = "digest@0.10.7", reason = "the RustCrypto 0.10-era stack (sha3 0.10 / aead 0.5)" },
-  { crate = "generic-array@0.14.7", reason = "the RustCrypto 0.10-era stack (aead 0.5)" },
-  { crate = "rand_core@0.6.4", reason = "the RustCrypto 0.10-era stack (crypto-common 0.1)" },
-  { crate = "cpufeatures@0.2.17", reason = "the RustCrypto 0.10-era stack (chacha20 0.9)" },
-  { crate = "base64@0.22.1", reason = "pbjson 0.9 pins the older base64 line; lifts with a pbjson release" },
-  { crate = "getrandom@0.2.17", reason = "rand_core 0.6 pins the older getrandom line" },
-  { crate = "windows-sys@0.52.0", reason = "ring 0.17 pins the older windows-sys line; lifts with a ring release" },
-  #{ crate = "ansi_term@0.11.0", reason = "you can specify a reason why it can't be updated/removed" },
+  { crate = "const-serialize@0.8.0-alpha.0", reason = "dioxus 0.7.10 internal mix (0.7.2 + 0.8.0-alpha); lifts with a dioxus release" },
+  { crate = "const-serialize-macro@0.8.0-alpha.3", reason = "dioxus 0.7.10 internal mix (0.7.2 + 0.8.0-alpha); lifts with a dioxus release" },
+  { crate = "rustc-hash@1.1.0", reason = "dioxus internal mix (1.1.0 + 2.1.3); lifts with a dioxus release" },
 ]
-# Similarly to `skip` allows you to skip certain crates during duplicate
-# detection. Unlike skip, it also includes the entire tree of transitive
-# dependencies starting at the specified crate, up to a certain depth, which is
-# by default infinite.
+
 skip-tree = [
   #"ansi_term@0.11.0", # will be skipped along with _all_ of its direct and transitive dependencies
   #{ crate = "ansi_term@0.11.0", depth = 20 },
