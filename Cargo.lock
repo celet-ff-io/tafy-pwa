@@ -3256,7 +3256,7 @@ dependencies = [
 
 [[package]]
 name = "tafy-pwa"
-version = "0.1.0-alpha.15"
+version = "0.1.0-alpha.16"
 dependencies = [
  "base64 0.22.1",
  "dioxus",
@@ -3264,6 +3264,7 @@ dependencies = [
  "getrandom 0.4.3",
  "js-sys",
  "prost",
+ "serde_json",
  "tokio",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -3282,6 +3283,8 @@ dependencies = [
  "log",
  "prost",
  "protobuf-varint-deframer",
+ "serde_json",
+ "tafy-carrier",
  "tokio",
  "wasm-bindgen",
  "wasm-bindgen-futures",

@@ -8,19 +8,51 @@
 //! back. The single-instance guard (Web Locks 'tafy-core') lives on
 //! the UI side — the worker is spawned by the winning tab only.
 //!
-//! BLOCKED-FOR-THE-CORE (batch 1, 2026-11-10): `zconned::host::
-//! run_with_arrivals` hardcodes `tokio::spawn(write_pump(..))` —
-//! tokio::spawn requires a tokio runtime, and no tokio runtime can
-//! run on wasm (the spike: std thread-park panics; JS events cannot
-//! wake a parked block_on). The negotiated change = the pump goes
-//! through the `Spawner` trait (already in the library since the
-//! carrier round). REPORTED to 106 (A17a), never patched here.
-//! Until it lands, the worker offers the STORAGE SELF-TEST face —
-//! the OPFS storage face's full round trip, no core needed.
+//! BATCH 3 (2026-11-11): the carrier leg is WIRED. The UI passes a
+//! second port (the control channel) in the same transfer; on it the
+//! UI sends the boot JSON {"t":"boot","relay":...} and later
+//! {"t":"connect",...} / {"t":"disconnect"}; the worker replies with
+//! {"t":"conn",...} state faces. The core runs with the TRANSPORT's
+//! sender (commits persist into the outbox and seal on the visit's
+//! attach; no visit = queued, delivered at the next one — the
+//! protocol's persist-then-queue discipline). The visit routine,
+//! the plane pumps and the seal task are the library's; this worker
+//! drives them through the WasmSpawner + the tafy-carrier gRPC-Web
+//! carrier.
 
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
+
+/// The UI→worker control commands (JSON on the control port).
+#[derive(Debug)]
+enum Ctrl {
+    Boot { relay: String },
+    Connect { relay: String },
+    Disconnect,
+}
+
+impl Ctrl {
+    fn parse(raw: &str) -> Option<Self> {
+        let v: serde_json::Value = serde_json::from_str(raw).ok()?;
+        match v.get("t")?.as_str()? {
+            "boot" => Some(Ctrl::Boot {
+                relay: v.get("relay").and_then(|r| r.as_str()).unwrap_or("").to_string(),
+            }),
+            "connect" => Some(Ctrl::Connect {
+                relay: v.get("relay").and_then(|r| r.as_str()).unwrap_or("").to_string(),
+            }),
+            "disconnect" => Some(Ctrl::Disconnect),
+            _ => None,
+        }
+    }
+}
+
+/// The worker→UI control faces (JSON on the control port).
+fn conn_face(scope: &web_sys::DedicatedWorkerGlobalScope, state: &str, detail: &str) {
+    let face = serde_json::json!({ "t": "conn", "state": state, "detail": detail });
+    let _ = scope.post_message(&JsValue::from_str(&face.to_string()));
+}
 
 /// The wasm host's spawner: the pump runs on the wasm-bindgen-futures
 /// executor (spawn_local — no runtime exists to park a task on; the
@@ -118,17 +150,25 @@ async fn boot() -> Result<(), JsValue> {
     // wasm-executor-proven wake path, spike v4).
     let (in_tx, mut in_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     let (port_tx, port_rx) = tokio::sync::oneshot::channel::<web_sys::MessagePort>();
+    // the CONTROL port (batch 3): connect/disconnect/conn-state faces
+    let (ctrl_tx, mut ctrl_rx) = tokio::sync::mpsc::unbounded_channel::<Ctrl>();
+    let (ctrl_port_tx, ctrl_port_rx) = tokio::sync::oneshot::channel::<web_sys::MessagePort>();
 
+    // the transfer message carries TWO ports: [i2c, control] (order
+    // fixed by the UI's post); strings ride the scope (breadcrumbs),
+    // the boot JSON rides the control port
     let reply = std::cell::RefCell::new(Some(port_tx));
+    let reply_ctrl = std::cell::RefCell::new(Some(ctrl_port_tx));
     let onmessage = Closure::wrap(Box::new(move |e: web_sys::MessageEvent| {
-        // the ONLY message on the worker scope = the transferred port;
-        // the frames themselves ride PORT2 (its onmessage is wired
-        // after the transfer below)
         let ports = e.ports();
-        let first = ports.get(0);
-        if !first.is_undefined() {
-            let p: web_sys::MessagePort = first.unchecked_into();
+        for p in ports {
+            if p.is_undefined() {
+                continue;
+            }
+            let p: web_sys::MessagePort = p.unchecked_into();
             if let Some(tx) = reply.borrow_mut().take() {
+                let _ = tx.send(p);
+            } else if let Some(tx) = reply_ctrl.borrow_mut().take() {
                 let _ = tx.send(p);
             }
         }
@@ -157,7 +197,40 @@ async fn boot() -> Result<(), JsValue> {
     let port = port_rx
         .await
         .map_err(|_| JsValue::from_str("port channel closed"))?;
-    step("[worker] port in, wiring port onmessage");
+    let ctrl_port = ctrl_port_rx
+        .await
+        .map_err(|_| JsValue::from_str("ctrl port channel closed"))?;
+    step("[worker] ports in, wiring ctrl onmessage");
+
+    // The control port: JSON faces both ways (the connect /
+    // disconnect commands; the conn-state faces ride back).
+    let feed_ctrl = ctrl_tx.clone();
+    let scope_ctrl = scope.clone();
+    let ctrl_onmessage = Closure::wrap(Box::new(move |e: web_sys::MessageEvent| {
+        let raw = e.data().as_string().unwrap_or_default();
+        match Ctrl::parse(&raw) {
+            Some(cmd) => {
+                let _ = feed_ctrl.send(cmd);
+            }
+            None => {
+                let _ = scope_ctrl.post_message(&JsValue::from_str(&format!(
+                    "[worker] bad ctrl face: {raw}"
+                )));
+            }
+        }
+    }) as Box<dyn FnMut(web_sys::MessageEvent)>);
+    ctrl_port.set_onmessage(Some(ctrl_onmessage.as_ref().unchecked_ref()));
+    ctrl_onmessage.forget();
+    ctrl_port.start();
+
+    // The boot gate: the UI's relay URL rides the FIRST control face
+    // (the core's sender shape depends on it).
+    let relay = match ctrl_rx.recv().await {
+        Some(Ctrl::Boot { relay }) => relay,
+        Some(_) => return Err(JsValue::from_str("first ctrl face must be boot")),
+        None => return Err(JsValue::from_str("ctrl channel closed")),
+    };
+    step("[worker] boot face in");
 
     // Wire the port: the UI posts its frames on PORT1 (this side =
     // PORT2); every frame here -> the bridge channel. The transfer
@@ -182,27 +255,18 @@ async fn boot() -> Result<(), JsValue> {
     // one, writes frames to the other; the bridge pumps both.
     let (mut core_in_write, core_in_read) = tokio::io::duplex(4096);
     let (mut core_out_read, core_out_write) = tokio::io::duplex(4096);
-    // Batch 1 = the stdio-only core shape: the detached carrier
-    // (no relay visits); the real carrier arrives in batch 3.
-    let sender = zconned::transport::Sender::<zconned::transport::Detached>::disabled();
 
-    // The core: the arrival kit opens on OUR storage face; the pump
-    // runs on the WasmSpawner (the 106 seam since 1b94be7 — the
-    // negotiated ask, landed). The kit's notices stream is a tokio
-    // mpsc receiver (Send, executor-independent) — fine here. The
-    // identity: the keyring lazily creates itself at
-    // `<root>/keyring.json` on first use (Keyring::open_with); the
-    // card rides the host-supplied `card` param (the stdio-only core
-    // has no mail identity of its own). The sender = the detached
-    // carrier (stdio-only semantics) for batch 1; the notices bus
-    // stays pure stdio until batch 3 wires the transport's ack
-    // statements.
+    // The carrier leg (batch 3): the core runs with the TRANSPORT's
+    // sender — commits persist into the outbox and seal on the
+    // visit's attach (persist-then-queue; no visit = queued). The
+    // transport is built here ONCE and lives in the control task;
+    // visit/repoint/disconnect drive it from the UI's faces.
     let storage_dyn: zconned::SharedStorage = storage;
     let kit = zconned::session::ArrivalKit::open("/tafy/store", storage_dyn.clone())
         .map_err(|e| JsValue::from_str(&format!("store open: {e}")))?;
     let keyring = zconned::mail::Keyring::open_with(
         "/tafy/store",
-        storage_dyn,
+        storage_dyn.clone(),
         zconned::mail::DEFAULT_OPK_POOL_SIZE,
         zconned::mail::DEFAULT_OPK_REPLENISH_THRESHOLD,
         zconned::mail::DEFAULT_OPK_BURN_DEPTH,
@@ -210,6 +274,37 @@ async fn boot() -> Result<(), JsValue> {
     .map_err(|e| JsValue::from_str(&format!("keyring open: {e}")))?;
     let card = zconned::transport::peer_face_of(&keyring.public_set());
     step("[worker] keyring open, card built");
+
+    let outbox = Arc::new(
+        zconned::mail::Outbox::open_with("/tafy/store", storage_dyn.clone())
+            .map_err(|e| JsValue::from_str(&format!("outbox open: {e}")))?,
+    );
+    let peers = Arc::new(
+        zconned::transport::PeerBook::open_with("/tafy/store", storage_dyn)
+            .map_err(|e| JsValue::from_str(&format!("peers open: {e}")))?,
+    );
+    let spawner: Arc<dyn zconned::transport::Spawner> = Arc::new(WasmSpawner);
+    // an unset relay = a never-opened endpoint (visits are explicit;
+    // the open would fail only if the UI asked for one)
+    let endpoint = if relay.trim().is_empty() {
+        "https://relay.not-configured.invalid".to_string()
+    } else {
+        relay.trim().to_string()
+    };
+    let mut transport = zconned::transport::Transport::builder()
+        .carrier(tafy_carrier::GrpcWebCarrier::new(endpoint))
+        .spawner(spawner.clone())
+        .keyring(Arc::new(std::sync::Mutex::new(keyring)))
+        .landing(Box::new(zconned::session::RecordLanding::new(
+            kit.store.clone(),
+            kit.notices_tx.clone(),
+        )))
+        .outbox(outbox)
+        .peers(peers)
+        .notices(Some(kit.notices_tx.clone()))
+        .build();
+    let sender = transport.sender();
+    step("[worker] transport built, sender wired");
     let scope_for_task = scope.clone();
     wasm_bindgen_futures::spawn_local(async move {
         let mut core_in_read = tokio::io::BufReader::new(core_in_read);
@@ -217,7 +312,7 @@ async fn boot() -> Result<(), JsValue> {
             kit,
             sender,
             Some(card),
-            std::sync::Arc::new(WasmSpawner),
+            spawner,
             &mut core_in_read,
             core_out_write,
         )
@@ -244,31 +339,63 @@ async fn boot() -> Result<(), JsValue> {
     // Outbound: the core's stdout side → deframe → one postMessage
     // per frame (the UI receives discrete frames).
     step("[worker] bridges up");
-    let scope_out = scope.clone();
     let mut deframer = protobuf_varint_deframer::Deframer::builder().build();
     let mut chunk = [0u8; 4096];
     use tokio::io::AsyncReadExt as _;
-    loop {
-        match core_out_read.read(&mut chunk).await {
-            Ok(0) => break,
-            Ok(n) => {
-                let mut data: &[u8] = &chunk[..n];
-                while let Some(frame) = deframer
-                    .feed(&mut data)
-                    .map_err(|e| JsValue::from_str(&format!("deframe: {e}")))?
-                {
-                    let _ = scope_out.post_message(&JsValue::from_str(&format!(
-                        "[worker] outbound frame ({}B): {:02x?}",
-                        frame.len(),
-                        &frame.as_ref()[..frame.len().min(12)]
-                    )));
-                    let arr = js_sys::Uint8Array::from(frame.as_ref());
-                    let _ = port.post_message(&arr);
+    let outbound = wasm_bindgen_futures::spawn_local(async move {
+        loop {
+            match core_out_read.read(&mut chunk).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    let mut data: &[u8] = &chunk[..n];
+                    match deframer.feed(&mut data) {
+                        Ok(frames) => {
+                            for frame in frames {
+                                let arr = js_sys::Uint8Array::from(frame.as_ref());
+                                let _ = port.post_message(&arr);
+                            }
+                        }
+                        Err(e) => {
+                            web_sys::console::error_1(&format!("deframe: {e}").into());
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    web_sys::console::error_1(&format!("core stdout: {e}").into());
+                    break;
                 }
             }
-            Err(e) => return Err(JsValue::from_str(&format!("core stdout: {e}"))),
         }
-    }
+    });
+    drop(outbound); // the bridge lives for the worker's lifetime
+
+    // The control task: owns the transport; drives visits.
+    conn_face(&scope, "disconnected", "");
+    let scope_ctrl_task = scope.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        while let Some(cmd) = ctrl_rx.recv().await {
+            match cmd {
+                Ctrl::Boot { .. } => {}
+                Ctrl::Connect { relay } => {
+                    conn_face(&scope_ctrl_task, "connecting", &relay);
+                    transport
+                        .repoint(tafy_carrier::GrpcWebCarrier::new(relay));
+                    match transport.visit().await {
+                        Ok(()) => conn_face(&scope_ctrl_task, "connected", ""),
+                        Err(e) => {
+                            conn_face(&scope_ctrl_task, "error", &e.to_string());
+                        }
+                    }
+                }
+                Ctrl::Disconnect => {
+                    transport.disconnect();
+                    conn_face(&scope_ctrl_task, "disconnected", "");
+                }
+            }
+        }
+    });
+
     Ok::<(), JsValue>(())
 }
 

@@ -55,6 +55,18 @@ pub enum Status {
     Failed(String),
 }
 
+/// The relay connection's live face (the worker's control-port
+/// statements: the visit's real state — no probe theater).
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum Conn {
+    #[default]
+    Disconnected,
+    Connecting,
+    Connected,
+    /// the visit failed (the detail = the transport's error)
+    Error(String),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ThreadRow {
     /// the thread id: "<major>:<minor>:<algo>:<digest-hex>"
@@ -94,6 +106,8 @@ pub struct CoreState {
     pub logs: HashMap<String, Vec<LogRow>>,
     /// the last Error frame, surfaced verbatim in the UI
     pub error: Option<String>,
+    /// the relay connection's live face
+    pub conn: Conn,
 }
 
 pub static CORE: GlobalSignal<CoreState> = Signal::global(CoreState::default);
@@ -381,6 +395,28 @@ fn route_statement(f: OutgoingFrame) {
         set_peers(&mut CORE.write(), &p.peers);
         return;
     }
+    // a resource landed in the core: fill the matching row slot (the
+    // row's ref tail = ":<algo>:<digest-hex>" — the push carries the
+    // same pair) and re-render
+    if let F::ResourcePush(p) = f.frame.as_ref().unwrap()
+        && let (Some(r), Some(v)) = (p.r#ref.as_ref(), p.value.as_ref())
+    {
+        let tail = format!(
+            ":{}:{}",
+            r.algo,
+            r.digest.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        );
+        let text = String::from_utf8_lossy(&v.data).into_owned();
+        let mut st = CORE.write();
+        for rows in st.logs.values_mut() {
+            for row in rows.iter_mut() {
+                if row.ref_id.ends_with(&tail) {
+                    row.text = text.clone();
+                }
+            }
+        }
+        return;
+    }
     if let F::MsgAdded(a) = f.frame.as_ref().unwrap()
         && let Some(entry) = a.entry.as_ref()
     {
@@ -468,19 +504,62 @@ async fn run_client() -> Result<(), String> {
         Err(_) => return Err("worker dropped its ready signal".to_string()),
     }
 
-    // the bridge: port2 travels INTO the worker; port1 stays here
+    // the bridges: TWO channels transfer in ONE message — [i2c, ctrl]
+    // (the worker's onmessage collects ports in order). The i2c port
+    // carries the framed protocol; the control port carries the
+    // boot/connect JSON and the conn-state faces back.
     let channel = web_sys::MessageChannel::new().map_err(|_| "no MessageChannel".to_string())?;
+    let ctrl_channel = web_sys::MessageChannel::new().map_err(|_| "no MessageChannel".to_string())?;
     let port = channel.port1();
+    let ctrl_port = ctrl_channel.port1();
+    park_ctrl_port(ctrl_port.clone());
     let transfer = js_sys::Array::new();
     transfer.push(&channel.port2());
+    transfer.push(&ctrl_channel.port2());
     worker
         .post_message_with_transfer(&JsValue::NULL, &transfer)
         .map_err(|e| format!("port transfer failed: {e:?}"))?;
+
+    // the boot face: the relay URL rides FIRST on the control port
+    // (the worker's core-sender shape depends on it)
+    let relay = relay_saved();
+    let boot_face = serde_json::json!({ "t": "boot", "relay": relay });
+    ctrl_port
+        .post_message(&JsValue::from_str(&boot_face.to_string()))
+        .map_err(|e| format!("boot face failed: {e:?}"))?;
+
+    // control faces back: the worker's conn statements -> the state
+    let (conn_tx, mut conn_rx) = tokio::sync::mpsc::unbounded_channel::<Conn>();
+    let ctrl_onmessage = Closure::wrap(Box::new(move |e: web_sys::MessageEvent| {
+        let raw = e.data().as_string().unwrap_or_default();
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            return;
+        };
+        let state = v.get("state").and_then(|s| s.as_str()).unwrap_or("");
+        let detail = v.get("detail").and_then(|s| s.as_str()).unwrap_or("");
+        let conn = match state {
+            "connecting" => Conn::Connecting,
+            "connected" => Conn::Connected,
+            "disconnected" => Conn::Disconnected,
+            "error" => Conn::Error(detail.to_string()),
+            _ => return,
+        };
+        let _ = conn_tx.send(conn);
+    }) as Box<dyn FnMut(web_sys::MessageEvent)>);
+    ctrl_port.set_onmessage(Some(ctrl_onmessage.as_ref().unchecked_ref()));
+    ctrl_onmessage.forget();
+    ctrl_port.start();
+    spawn_local(async move {
+        while let Some(conn) = conn_rx.recv().await {
+            CORE.write().conn = conn;
+        }
+    });
 
     // inbound: onmessage -> the bridge channel (the spike-proven
     // JS-event wake path: tokio channels wake fine on the wasm
     // executor)
     trace("channel up, wiring onmessage");
+    let _ = &ctrl_port; // the control port lives for the page's life
     let (in_tx, in_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     let onmessage = Closure::wrap(Box::new(move |e: web_sys::MessageEvent| {
         let bytes = js_sys::Uint8Array::new(&e.data()).to_vec();
@@ -565,6 +644,12 @@ async fn run_client() -> Result<(), String> {
     trace(&format!("seeded; threads={}", CORE.read().threads.len()));
     if CORE.read().status == Status::Booting {
         CORE.write().status = Status::Ready;
+    }
+    // the relay visit: auto-connect when the setting exists (107's
+    // posture — the connection IS the visit; no visit = queued mail)
+    let relay = relay_saved();
+    if !relay.trim().is_empty() {
+        relay_connect(relay);
     }
     Ok(())
 }
@@ -782,4 +867,58 @@ pub async fn commit(thread_hex: Option<&str>, text: &str) -> Result<String, Stri
         }
     }
     new_id.ok_or_else(|| "commit answered without an entry".to_string())
+}
+
+// ---- the relay control face (batch 3) ----
+
+/// The relay URL reader (the UI's own setting; localStorage).
+pub fn relay_saved() -> String {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::window()
+            .and_then(|w| w.local_storage().ok().flatten())
+            .and_then(|s| s.get_item("tafy.relay_url").ok().flatten())
+            .unwrap_or_default()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        String::new()
+    }
+}
+
+/// The control port, parked at boot (the worker's connect /
+/// disconnect faces ride it; !Send — single-threaded page, fine).
+#[cfg(target_arch = "wasm32")]
+static CTRL_PORT: std::sync::OnceLock<web_sys::MessagePort> = std::sync::OnceLock::new();
+
+/// Park the control port (run_client calls this once, at boot).
+#[cfg(target_arch = "wasm32")]
+fn park_ctrl_port(p: web_sys::MessagePort) {
+    let _ = CTRL_PORT.set(p);
+}
+
+/// Drive a relay visit: the worker repoints + runs the library's
+/// visit routine (claim, flip, pool, plane pumps, cursors, re-push).
+pub fn relay_connect(url: String) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(port) = CTRL_PORT.get() {
+            let face = serde_json::json!({ "t": "connect", "relay": url });
+            let _ = port.post_message(&JsValue::from_str(&face.to_string()));
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = url;
+    }
+}
+
+/// End the current visit (the pumps end; queued mail stays).
+pub fn relay_disconnect() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(port) = CTRL_PORT.get() {
+            let _ = port.post_message(&JsValue::from_str(r#"{"t":"disconnect"}"#));
+        }
+    }
 }

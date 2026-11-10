@@ -69,6 +69,8 @@ web-sys = { version = "0.3.107", features = [
   "FileSystemRemoveOptions",
 ] }
 futures = "0.3"
+serde_json.workspace = true
+tafy-carrier = { path = "../tafy-carrier" }
 console_error_panic_hook = "0.1.7"
 
 # -- the runtime (the spike proved the current-thread runtime

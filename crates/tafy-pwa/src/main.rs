@@ -55,7 +55,36 @@ fn copy_to_clipboard(t: String) {
     });
 }
 
-/// native check face (see core.rs): compile-only stub.
+//// The relay strip's faces, sourced from the REAL visit state (the
+/// worker's control-port statements; no probe theater).
+fn conn_face(conn: &core::Conn, relay_unset: bool) -> String {
+    match conn {
+        core::Conn::Disconnected if relay_unset => "relay: not set".to_string(),
+        core::Conn::Disconnected => "relay: not connected".to_string(),
+        core::Conn::Connecting => "relay: connecting…".to_string(),
+        core::Conn::Connected => "relay: connected ✓".to_string(),
+        core::Conn::Error(e) => format!("relay: error ✗ {e}"),
+    }
+}
+
+fn conn_class(conn: &core::Conn) -> &'static str {
+    match conn {
+        core::Conn::Connected => "relay-line ok",
+        core::Conn::Error(_) => "relay-line bad",
+        _ => "relay-line",
+    }
+}
+
+fn conn_sub(conn: &core::Conn) -> &'static str {
+    match conn {
+        // the protocol's persist-then-queue: an unvisited commit
+        // re-enters the seal task at the next visit
+        core::Conn::Connected => "sending through the relay",
+        _ => "messages queue on this device until the next visit",
+    }
+}
+
+// native check face (see core.rs): compile-only stub.
 #[cfg(not(target_arch = "wasm32"))]
 fn copy_to_clipboard(t: String) {
     let _ = t;
@@ -72,89 +101,6 @@ fn save_relay(url: &str) {
 #[cfg(not(target_arch = "wasm32"))]
 fn save_relay(_url: &str) {}
 
-/// The relay's reachability, probed from the UI face (107-style
-/// status). Honest face: the probe answers ONLY "is the relay's
-/// browser face reachable" — the send path is a separate, still-
-/// unwired leg (batch 3), stated right below the probe result.
-#[derive(Clone, Copy, PartialEq)]
-enum RelayStatus {
-    NotSet,
-    Checking,
-    Reachable,
-    Unreachable,
-}
-
-fn relay_face(s: RelayStatus) -> &'static str {
-    match s {
-        RelayStatus::NotSet => "relay: not set",
-        RelayStatus::Checking => "relay: checking…",
-        RelayStatus::Reachable => "relay: reachable ✓",
-        RelayStatus::Unreachable => "relay: unreachable ✗",
-    }
-}
-
-fn relay_status_class(s: RelayStatus) -> &'static str {
-    match s {
-        RelayStatus::Reachable => "relay-line ok",
-        RelayStatus::Unreachable => "relay-line bad",
-        _ => "relay-line",
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn probe_relay(url: String, mut st: dioxus::prelude::Signal<RelayStatus>) {
-    use wasm_bindgen::JsCast;
-    use wasm_bindgen::prelude::Closure;
-    use wasm_bindgen_futures::JsFuture;
-    if url.starts_with("wss://") {
-        match web_sys::WebSocket::new(&url) {
-            Ok(ws) => {
-                st.set(RelayStatus::Checking);
-                let ws_open = ws.clone();
-                let mut st_open = st;
-                let onopen = wasm_bindgen::prelude::Closure::wrap(Box::new(move |_| {
-                    // the handshake completed: reachable; do not keep
-                    // the socket — this is a probe, not the carrier
-                    ws_open.close().ok();
-                    st_open.set(RelayStatus::Reachable);
-                })
-                    as Box<dyn FnMut(wasm_bindgen::JsValue)>);
-                ws.set_onopen(Some(onopen.as_ref().unchecked_ref()));
-                onopen.forget(); // page-lifetime probe
-                let mut st_err = st;
-                let onerr = wasm_bindgen::prelude::Closure::wrap(Box::new(move |_| {
-                    st_err.set(RelayStatus::Unreachable);
-                })
-                    as Box<dyn FnMut(wasm_bindgen::JsValue)>);
-                ws.set_onerror(Some(onerr.as_ref().unchecked_ref()));
-                ws.set_onclose(Some(onerr.as_ref().unchecked_ref()));
-                onerr.forget();
-            }
-            Err(_) => st.set(RelayStatus::Unreachable),
-        }
-    } else {
-        // https: a no-cors fetch — resolving (even opaque) means the
-        // server answered; a network-level failure rejects
-        let opts = web_sys::RequestInit::new();
-        opts.set_method("GET");
-        opts.set_mode(web_sys::RequestMode::NoCors);
-        st.set(RelayStatus::Checking);
-        if let Some(w) = web_sys::window() {
-            let req = web_sys::Request::new_with_str_and_init(&url, &opts).expect("probe request");
-            let fut = JsFuture::from(w.fetch_with_request(&req));
-            spawn_local(async move {
-                match fut.await {
-                    Ok(_) => st.set(RelayStatus::Reachable),
-                    Err(_) => st.set(RelayStatus::Unreachable),
-                }
-            });
-        }
-    }
-}
-#[cfg(not(target_arch = "wasm32"))]
-fn probe_relay(_url: String, mut st: dioxus::prelude::Signal<RelayStatus>) {
-    st.set(RelayStatus::Unreachable);
-}
 // native check face (see core.rs): compile-only stub — the app never
 // runs natively (A17: the core lives in a browser worker).
 #[cfg(not(target_arch = "wasm32"))]
@@ -690,7 +636,10 @@ fn RelayRow() -> Element {
                         return;
                     }
                     save_relay(&url);
-                    draft.set(url);
+                    draft.set(url.clone());
+                    // saving = connecting: the visit starts right away
+                    // (the strip on the threads reports the outcome)
+                    core::relay_connect(url);
                 },
                 "Save"
             }
@@ -828,22 +777,6 @@ fn ThreadPage(id: String) -> Element {
     // fresh commit the page navigates to the new thread's real id
     let mut draft = use_signal(String::new);
     let mut sending = use_signal(|| false);
-    // the relay status face (107-style): a reachability probe plus
-    // the honest send-path state — the carrier leg is NOT wired yet,
-    // so messages stay local regardless of the probe's result
-    let relay_status = use_signal(|| {
-        if relay_saved().trim().is_empty() {
-            RelayStatus::NotSet
-        } else {
-            RelayStatus::Checking
-        }
-    });
-    use_effect(move || {
-        let url = relay_saved().trim().to_string();
-        if !url.is_empty() {
-            probe_relay(url, relay_status);
-        }
-    });
     let id_for_send = id.clone();
     let submit = move |e: dioxus::prelude::Event<dioxus::prelude::FormData>| {
         e.prevent_default();
@@ -901,8 +834,8 @@ fn ThreadPage(id: String) -> Element {
             }
             form { class: "composer", onsubmit: submit,
                 div { class: "relay-strip",
-                    span { class: relay_status_class(relay_status()), "{relay_face(relay_status())}" }
-                    span { class: "relay-sub", "send path: not wired — carrier leg pending; messages stay on this device" }
+                    span { class: conn_class(&core::CORE.read().conn), "{conn_face(&core::CORE.read().conn, relay_saved().trim().is_empty())}" }
+                    span { class: "relay-sub", "{conn_sub(&core::CORE.read().conn)}" }
                 }
                 div { class: "field",
                     input { r#type: "text", placeholder: if is_new { "First message" } else { "Message" },

@@ -5,7 +5,7 @@ name = "tafy-pwa"
 # one verification round (deployed or not); deploy ships the current
 # number. Single source: this field feeds env!("CARGO_PKG_VERSION")
 # (the version display); licenses.html carries no stamp (A18).
-version = "0.1.0-alpha.15"
+version = "0.1.0-alpha.16"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,6 +14,7 @@ publish.workspace = true
 # Web-only wasm bin; built by `dx build` (wasm32-unknown-unknown).
 [dependencies]
 dioxus.workspace = true
+serde_json.workspace = true
 
 # Pure-Rust frame/state deps compile on BOTH faces: the client's
 # frame codec + state (core.rs) and the card helpers (main.rs) are

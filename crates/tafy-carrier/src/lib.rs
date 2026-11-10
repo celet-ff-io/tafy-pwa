@@ -20,8 +20,8 @@ mod imp {
     use futures::Stream;
     use futures::StreamExt as _;
     use send_wrapper::SendWrapper;
-    use zconned::transport::{Carrier, Error, MailSession, Result};
     use zconnor_mail_types::relay::mailbox_service_client::MailboxServiceClient;
+    use zconned::transport::{Carrier, Error, MailSession, Result};
     use zconnor_mail_types::{mail, relay};
 
     /// The connection factory: one gRPC-Web client per endpoint
@@ -285,15 +285,88 @@ pub use imp::{GrpcWebCarrier, GrpcWebPlanes, GrpcWebSession};
 
 #[cfg(not(target_arch = "wasm32"))]
 mod imp {
-    // The native shell: never runs; the workspace's host-target
-    // `cargo check` needs the names to resolve.
+    // The native shell: never runs (the core lives in a browser
+    // worker, A17); the workspace's host-target `cargo check` still
+    // needs the full trait surface to resolve.
+    use zconned::transport::{Carrier, Error, MailSession, Result};
+    use zconnor_mail_types::{mail, relay};
+
     pub struct GrpcWebCarrier;
+
     impl GrpcWebCarrier {
         pub fn new(_endpoint: impl Into<String>) -> Self {
             Self
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct GrpcWebSession;
+
+    fn never<T>() -> Result<T> {
+        Err(Error::Call {
+            message: "the native shell opens no session".into(),
+        })
+    }
+
+    impl Carrier for GrpcWebCarrier {
+        type Session = GrpcWebSession;
+
+        async fn open(&self) -> Result<Self::Session> {
+            never()
+        }
+    }
+
+
+    impl MailSession for GrpcWebSession {
+        type Planes = futures::stream::Empty<Result<relay::PlaneFrame>>;
+
+        async fn get_version(&mut self) -> Result<u32> {
+            never()
+        }
+        async fn register_mailbox(&mut self, _mailbox: mail::MailboxPublicSet) -> Result<()> {
+            never()
+        }
+        async fn get_challenge(&mut self) -> Result<relay::Challenge> {
+            never()
+        }
+        async fn claim_mailbox(&mut self, _anchor: Vec<u8>, _claim_sig: Vec<u8>) -> Result<()> {
+            never()
+        }
+        async fn set_spk(&mut self, _spk: mail::Spk) -> Result<()> {
+            never()
+        }
+        async fn set_opks(&mut self, _opks: Vec<mail::Opk>) -> Result<()> {
+            never()
+        }
+        async fn get_bundle(&mut self, _mailbox: Vec<u8>) -> Result<relay::Bundle> {
+            never()
+        }
+        async fn send_transcript_mail(&mut self, _mail: mail::Mail) -> Result<relay::MailReceipt> {
+            never()
+        }
+        async fn send_resources_mail(&mut self, _mail: mail::Mail) -> Result<relay::MailReceipt> {
+            never()
+        }
+        async fn report_mail_received(
+            &mut self,
+            _from_mailbox: Vec<u8>,
+            _up_to: u64,
+        ) -> Result<()> {
+            never()
+        }
+        async fn get_mail_cursors(&mut self) -> Result<Vec<relay::MailboxCursor>> {
+            never()
+        }
+        async fn transcript_plane(&mut self) -> Result<Self::Planes> {
+            never()
+        }
+        async fn resources_plane(&mut self) -> Result<Self::Planes> {
+            never()
         }
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use imp::GrpcWebCarrier;
+#[cfg(not(target_arch = "wasm32"))]
+pub use imp::GrpcWebSession;
