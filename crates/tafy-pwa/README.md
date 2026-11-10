@@ -118,3 +118,32 @@ Every deploy is a distribution (A18). Gate: `nix run
 nixpkgs#cargo-deny -- check licenses bans` (deny.toml adapted from
 LPZ106; our own unpublished crates are skipped via private.ignore —
 they carry no license field on purpose = all rights reserved).
+
+## the tafy-core worker bundle (rebuild step — the stale-artifact trap)
+
+`public/tafy-core/` = STAGED BUILD ARTIFACTS of tafy-wasm (the glue
+tafy-worker.js is static; the wasm-bindgen output is generated). The
+dx build copies them verbatim — IT NEVER REBUILDS THEM. After ANY
+tafy-wasm change:
+
+    RUSTFLAGS="--remap-path-prefix=... (the hygiene env, see above)" \
+      cargo build -p tafy-wasm --target wasm32-unknown-unknown --release
+    wasm-bindgen --target web --out-dir crates/tafy-pwa/public/tafy-core \
+      $CARGO_TARGET_DIR/wasm32-unknown-unknown/release/tafy_wasm.wasm
+    # then the dx build (which stages the copies), then sanitise-wasm.py
+    # over BOTH $DIST/assets/*.wasm AND $DIST/tafy-core/*.wasm
+
+wasm-bindgen MUST be 0.2.130 (see the toolchain note above). The
+alpha.16 round lost hours to this: the committed bundle predated the
+whole carrier round and every worker-side change silently never ran.
+
+## the conn-state faces (the control channel)
+
+The UI transfers TWO ports in one message ([i2c, ctrl]); the control
+port carries JSON both ways: the UI -> worker {t:boot|connect|
+disconnect|diag}, the worker -> UI {t:conn, state, detail}. The
+strip on the composer renders the REAL visit state; a dead relay
+fails LOUDLY (the transport's Error::Call surfaces verbatim) while
+commits keep landing locally (persist-then-queue; the outbox re-push
+runs at the next visit). The boot auto-connects when the relay
+setting exists; Save = save + connect.
