@@ -110,7 +110,15 @@ body {
   height: 20px;
 }
 
-/* menu-page rows with a leading icon (Settings gear) */
+/* menu-page rows: icon + text stay ADJACENT as one lead group —
+   .row's space-between must never spread them to opposite edges */
+.row-lead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
 .row-icon {
   flex: none;
   display: flex;

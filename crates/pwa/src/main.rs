@@ -298,11 +298,12 @@ fn fmt_ts(ms: u64) -> String {
     format!("{:04}-{:02}-{:02} {:02}:{:02}", y, m, d, hh, mm)
 }
 
-// ---- the topbar shared by list-level pages ----
+// ---- the topbar shared by list-level pages (role-split) ----
 // The multi-function key keeps ONE geometry on every page that has
 // it, with a two-state icon: hamburger (opens the menu page) vs
-// close-X (returns Home). The brand sits beside the key (a breath
-// apart), Me at the right edge.
+// close-X (returns Home). Role split (principal, IA v3.2): the
+// brand (wordmark + version) shows ONLY on the menu page — Home
+// leaves that slot EMPTY; the Me button shows ONLY on Home.
 
 #[component]
 fn TopBar(menu: bool) -> Element {
@@ -325,17 +326,21 @@ fn TopBar(menu: bool) -> Element {
                     }
                 }
             }
-            div { class: "brand",
-                h1 { class: "wordmark", "tAfY" }
-                // the deployed build id — the phone-visible answer
-                // to "is this the latest fixed version?"
-                span { class: "version", "v{version}" }
+            if menu {
+                // the brand belongs to the menu page: wordmark leads,
+                // version trails small and dim — Home leaves it empty
+                div { class: "brand",
+                    h1 { class: "wordmark", "tAfY" }
+                    span { class: "version", "v{version}" }
+                }
             }
-            div { class: "topbar-actions",
-                Link { to: Route::Me {}, class: "icon-btn", title: "Me",
-                    svg { fill: "none", stroke: "currentColor", stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round", view_box: "0 0 24 24",
-                        path { d: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" }
-                        circle { cx: "12", cy: "7", r: "4" }
+            if !menu {
+                div { class: "topbar-actions",
+                    Link { to: Route::Me {}, class: "icon-btn", title: "Me",
+                        svg { fill: "none", stroke: "currentColor", stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round", view_box: "0 0 24 24",
+                            path { d: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" }
+                            circle { cx: "12", cy: "7", r: "4" }
+                        }
                     }
                 }
             }
@@ -440,6 +445,9 @@ fn Menu() -> Element {
             TopBar { menu: true }
             div { class: "list",
                 Link { to: Route::Settings {}, class: "row",
+                    // one lead group so .row's space-between can't
+                    // spread icon and text to opposite edges
+                    div { class: "row-lead",
                     div { class: "row-icon",
                         svg { fill: "none", stroke: "currentColor", stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round", view_box: "0 0 24 24",
                             circle { cx: "12", cy: "12", r: "3" }
@@ -448,6 +456,7 @@ fn Menu() -> Element {
                     }
                     div { class: "row-main",
                         span { class: "row-title", "Settings" }
+                    }
                     }
                 }
             }
