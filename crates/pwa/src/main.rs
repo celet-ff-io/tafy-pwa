@@ -1,11 +1,18 @@
 // tafy-pwa — empty shell (mock era).
-// IA v2 (principal design, 2026-11-10): layout principle = put
+// IA v3 (principal design, 2026-11-10): layout principle = put
 // length-variant lists where NOTHING sits below them (same reason a
-// thread is full-screen). Home = topbar (wordmark "tAfY" + me/settings
-// buttons) over a free-growing thread list. Me page = identity hint
-// over the contacts list (variable, nothing below). Settings = its own
-// page. Thread = full-screen focused. The message level knows only
-// THREADS — "conversation" was a zconnor-connection term, dropped.
+// thread is full-screen). Home topbar = hamburger (the multi-function
+// key) left, wordmark+version center (a breath away from the key),
+// Me button right. All meta-destinations live in the DRAWER: a
+// curated BOUNDED list with Settings pinned last (flex-end); future
+// entries slot above it — if the list ever stopped being bounded,
+// Settings would move to a pinned footer row (never below an
+// unbounded list). Me page = identity + contacts on ONE page: Me and
+// every contact are ordinary peers — the message level is objectified
+// threads, not "DM"/"GM". Settings chain = Settings -> About ->
+// License (rare + legal content sits deep). Thread = full-screen
+// focused (the drawer does NOT enter it). The message level knows
+// only THREADS — "conversation" was a zconnor-connection term, dropped.
 // Mock seam: typed in-memory placeholders ONLY — the real wasm core
 // (LPZ106) plugs in behind this seam at the wiring phase. No network,
 // no crypto, no persistence (A16 mock era; A17 WASM-local architecture).
@@ -134,6 +141,8 @@ enum Route {
     Me {},
     #[route("/settings")]
     Settings {},
+    #[route("/about")]
+    About {},
     #[route("/thread/:id")]
     ThreadPage { id: String },
     #[route("/:..segments")]
@@ -283,15 +292,48 @@ fn fmt_ts(ms: u64) -> String {
     format!("{:04}-{:02}-{:02} {:02}:{:02}", y, m, d, hh, mm)
 }
 
-// ---- P-Home: topbar over a free-growing thread list ----
+// ---- the multi-function key's drawer ----
+// A curated bounded list (IA v3 invariant): future entries slot above
+// Settings, which is pinned LAST — visually literal via flex-end, so
+// the list grows downward only into the space above the pinned item.
+
+#[component]
+fn Drawer(open: Signal<bool>) -> Element {
+    if !open() {
+        return rsx! { {} };
+    }
+    rsx! {
+        div { class: "drawer-backdrop", onclick: move |_| open.set(false),
+            nav { class: "drawer", onclick: |e| e.stop_propagation(),
+                div { class: "list",
+                    Link { to: Route::Settings {}, class: "row",
+                        div { class: "row-main",
+                            span { class: "row-title", "Settings" }
+                            span { class: "row-sub", "Identity · relay · about" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---- P-Home: multi-function key + brand + Me, over a free thread list ----
 
 #[component]
 fn Home() -> Element {
     // compile-time constant from Cargo.toml — the single version source
     let version = env!("CARGO_PKG_VERSION");
+    let mut menu = use_signal(|| false);
     rsx! {
         div { class: "page",
+            Drawer { open: menu }
             header { class: "topbar",
+                button { class: "icon-btn", title: "Menu", onclick: move |_| menu.toggle(),
+                    svg { fill: "none", stroke: "currentColor", stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round", view_box: "0 0 24 24",
+                        path { d: "M3 6h18M3 12h18M3 18h18" }
+                    }
+                }
                 div { class: "brand",
                     h1 { class: "wordmark", "tAfY" }
                     // the deployed build id — the phone-visible answer
@@ -303,12 +345,6 @@ fn Home() -> Element {
                         svg { fill: "none", stroke: "currentColor", stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round", view_box: "0 0 24 24",
                             path { d: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" }
                             circle { cx: "12", cy: "7", r: "4" }
-                        }
-                    }
-                    Link { to: Route::Settings {}, class: "icon-btn", title: "Settings",
-                        svg { fill: "none", stroke: "currentColor", stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round", view_box: "0 0 24 24",
-                            circle { cx: "12", cy: "12", r: "3" }
-                            path { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" }
                         }
                     }
                 }
@@ -378,12 +414,33 @@ fn Settings() -> Element {
                         span { class: "row-sub", "Not configured — waiting on 106's relay browser face" }
                     }
                 }
-                div { class: "row",
+                Link { to: Route::About {}, class: "row",
                     div { class: "row-main",
                         span { class: "row-title", "About" }
-                        span { class: "row-sub", "tAfY · first-light · mock era" }
+                        span { class: "row-sub", "License and copyright" }
                     }
                 }
+            }
+        }
+    }
+}
+
+// ---- P-About: the legal face (chain: Settings -> About -> License) ----
+// License sits deep: rare + legal content. The copyright line is the
+// repo LICENSE's display mirror (A18 closed posture); the © line uses
+// the UTF-8 mark; the year range is 2026-present — static hosting may
+// outlive active development, the page keeps serving as-is.
+
+#[component]
+fn About() -> Element {
+    rsx! {
+        div { class: "page",
+            header { class: "page-head",
+                Link { to: Route::Settings {}, class: "back", "‹" }
+                strong { "About" }
+            }
+            p { class: "page-hint", "tAfY — the zconn web client (mock era, first-light)" }
+            div { class: "list",
                 // licenses.html = generated by cargo-about; regenerate
                 // whenever the dependency set changes before deploying
                 // (rules.md A18 — every deploy is a distribution).
@@ -394,6 +451,7 @@ fn Settings() -> Element {
                     }
                 }
             }
+            p { class: "copyright", "Copyright © 2026-present tAfY Developers" }
         }
     }
 }

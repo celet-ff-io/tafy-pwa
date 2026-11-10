@@ -1,9 +1,11 @@
-/* tafy — shell v2. Layout principle (principal, 2026-11-10): put
-   length-variant lists where NOTHING sits below them — Home = topbar
-   (wordmark + me/settings buttons) over a free-growing thread list;
-   Me = identity hint over a free-growing contacts list; Thread =
-   full-screen stream over a pinned composer. AI-chat minimalism:
-   no bubbles, full-width blocks, system font, one accent, dark. */
+/* tafy — shell v3 (IA v3). Layout principle (principal, 2026-11-10):
+   put length-variant lists where NOTHING sits below them — Home =
+   topbar (multi-function key + brand + me) over a free-growing thread
+   list; Me = identity hint over a free-growing contacts list; Thread
+   = full-screen stream over a pinned composer. The drawer is a
+   curated BOUNDED list with Settings pinned last (flex-end). AI-chat
+   minimalism: no bubbles, full-width blocks, system font, one accent,
+   dark + light. */
 
 :root {
   color-scheme: dark;
@@ -51,7 +53,8 @@ body {
   padding-bottom: 24px;
 }
 
-/* home topbar: wordmark left, me + settings icon buttons right */
+/* home topbar: multi-function key left, brand center (a breath away
+   from the key), me button right */
 .topbar {
   display: flex;
   align-items: center;
@@ -102,6 +105,40 @@ body {
 .icon-btn svg {
   width: 20px;
   height: 20px;
+}
+
+/* the multi-function key's drawer: a curated bounded list with
+   Settings pinned last (flex-end) — future entries fill the space
+   ABOVE the pinned item; the list never grows past it downward.
+   Backdrop tap closes; the key toggles. Phone-first: no Esc key. */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 21;
+  width: 280px;
+  max-width: 80vw;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 16px 0;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+
+/* About page footer: the display face of the repo LICENSE */
+.copyright {
+  margin: 16px 16px 8px;
+  font-size: 12px;
+  color: var(--dim);
 }
 
 /* generic page header (Me / Settings / Thread) */
