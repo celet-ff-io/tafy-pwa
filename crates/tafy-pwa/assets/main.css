@@ -268,7 +268,41 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.45; /* disabled in the shell */
+  opacity: 0.45; /* no draft / in flight */
+  transition: opacity 0.15s;
+}
+
+/* a draft present = the send affordance lights up (the principal:
+   a permanently dim send key reads as "cannot send") */
+.composer .send.ready {
+  opacity: 1;
+}
+
+/* the relay status strip (107-style): the probe result + the honest
+   send-path state, pinned above the composer */
+.relay-strip {
+  padding: 6px 16px 8px;
+  display: grid;
+  gap: 2px;
+}
+
+.relay-line {
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.relay-line.ok {
+  color: #2e8b57;
+}
+
+.relay-line.bad {
+  color: #c0392b;
+}
+
+.relay-sub {
+  font-size: 11px;
+  color: var(--dim);
+  opacity: 0.75;
 }
 
 /* message blocks: author / text / ts — ts is a STANDALONE dim line
