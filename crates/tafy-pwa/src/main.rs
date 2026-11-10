@@ -535,7 +535,7 @@ fn Contacts() -> Element {
                         disabled: paste.read().trim().is_empty(),
                         onclick: move |_| {
                             let card = paste.read().trim().to_string();
-                            spawn_local(async move {
+                            spawn(async move {
                                 match core::add_peer(&card).await {
                                     Ok(_) => {
                                         paste.set(String::new());
@@ -781,13 +781,19 @@ fn ThreadPage(id: String) -> Element {
     let submit = move |e: dioxus::prelude::Event<dioxus::prelude::FormData>| {
         e.prevent_default();
         let text = draft().trim().to_string();
+        web_sys::console::log_1(&format!("[composer] submit: len={}", text.len()).into());
         if text.is_empty() || sending() {
+            web_sys::console::log_1(&"[composer] submit: rejected (empty or in-flight)".into());
             return;
         }
         sending.set(true);
+        web_sys::console::log_1(&"[composer] submit: accepted, spawning commit".into());
         let id = id_for_send.clone();
         let new = is_new;
-        spawn_local(async move {
+        // the reactive spawn (NOT spawn_local): this task writes the
+        // component-local sending/draft signals + the navigator — a
+        // bare wasm task has no scope and panics at runtime.rs:223
+        spawn(async move {
             let hex = if new { None } else { Some(id.as_str()) };
             match core::commit(hex, &text).await {
                 // a fresh commit re-targets the page to the born thread
@@ -800,7 +806,10 @@ fn ThreadPage(id: String) -> Element {
                     sending.set(false);
                     draft.set(String::new());
                 }
-                Err(_) => sending.set(false), // the error note rides CORE.error
+                Err(e) => {
+                    sending.set(false);
+                    core::CORE.write().error = Some(e); // surfaced in the stream
+                }
             }
         });
     };
@@ -841,12 +850,12 @@ fn ThreadPage(id: String) -> Element {
                     input { r#type: "text", placeholder: if is_new { "First message" } else { "Message" },
                         value: "{draft}",
                         oninput: move |e| draft.set(e.value()),
-                        disabled: "{sending}",
+                        disabled: sending,
                     }
                     button {
                         class: if draft().trim().is_empty() || sending() { "send" } else { "send ready" },
                         r#type: "submit",
-                        disabled: "{sending}",
+                        disabled: sending,
                         "↑"
                     }
                 }

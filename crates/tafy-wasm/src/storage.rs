@@ -128,11 +128,47 @@ pub struct OpfsStorage {
     me: OnceLock<std::sync::Weak<OpfsStorage>>,
 }
 
+/// TEMP diag: the newest opened store (the diag export reads its
+/// mirror + the persist failure).
+pub(crate) static ACTIVE_STORAGE: OnceLock<Arc<OpfsStorage>> = OnceLock::new();
+
+/// TEMP diag: the live store's mirror (files + sizes) + the last
+/// persistence failure — the reload-loss hunt's probe.
+pub(crate) async fn diag_face() -> String {
+    let Some(store) = ACTIVE_STORAGE.get() else {
+        return "diag: no active store".to_string();
+    };
+    let t = store.tree.lock().unwrap();
+    let mut lines = vec![format!("diag: root={:?}", store.root_path)];
+    for (p, b) in t.files.iter() {
+        lines.push(format!(
+            "  file {:?} ({}B): {:?}",
+            p,
+            b.len(),
+            String::from_utf8_lossy(&b[..b.len().min(80)])
+        ));
+    }
+    for d in t.dirs.iter() {
+        lines.push(format!("  dir {:?}", d));
+    }
+    drop(t);
+    if let Some(e) = store.last_persist_error.lock().unwrap().as_ref() {
+        lines.push(format!("  LAST-PERSIST-ERROR: {e}"));
+    }
+    lines.join("\n")
+}
+
 impl OpfsStorage {
     /// Open (creating if needed) the OPFS root and seed the mirror
     /// from what is already on disk. Must run INSIDE a worker
     /// (sync access handles are worker-only).
     pub async fn open(root_path: &str) -> Result<Arc<Self>, JsValue> {
+        let arc = Self::open_inner(root_path).await?;
+        let _ = ACTIVE_STORAGE.set(arc.clone());
+        Ok(arc)
+    }
+
+    async fn open_inner(root_path: &str) -> Result<Arc<Self>, JsValue> {
         let navigator: web_sys::Navigator =
             js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("navigator"))?
                 .unchecked_into();

@@ -454,6 +454,11 @@ pub fn boot() {
 
 #[cfg(target_arch = "wasm32")]
 async fn run_client() -> Result<(), String> {
+    // the UI thread's panic hook: a release-wasm panic = a bare trap
+    // with an anonymous JS exception — surface the panic message
+    std::panic::set_hook(Box::new(|info| {
+        web_sys::console::error_1(&format!("[panic] {info}").into());
+    }));
     // the worker URL resolves against the DOCUMENT base (the page
     // lives under /tafy/ on gh-pages — a router path must not bend
     // the relative resolution)
@@ -533,6 +538,8 @@ async fn run_client() -> Result<(), String> {
     let ctrl_onmessage = Closure::wrap(Box::new(move |e: web_sys::MessageEvent| {
         let raw = e.data().as_string().unwrap_or_default();
         let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            // not a conn face (e.g. the storage diag reply) -> console
+            trace(&format!("[ctrl] {raw}"));
             return;
         };
         let state = v.get("state").and_then(|s| s.as_str()).unwrap_or("");
@@ -647,6 +654,8 @@ async fn run_client() -> Result<(), String> {
     }
     // the relay visit: auto-connect when the setting exists (107's
     // posture — the connection IS the visit; no visit = queued mail)
+    // TEMP diag: the post-reload walk's disk truth (removed after the hunt)
+    storage_diag();
     let relay = relay_saved();
     if !relay.trim().is_empty() {
         relay_connect(relay);
@@ -801,6 +810,7 @@ pub fn load_thread(id: String) {
 /// chain (the core generates the genesis parent); Some(id) commits
 /// onto the thread's leaf (day-one linear frontier).
 pub async fn commit(thread_hex: Option<&str>, text: &str) -> Result<String, String> {
+    trace(&format!("[commit] enter: thread={thread_hex:?} len={}", text.len()));
     // 1. the cursor
     let cursor = match thread_hex {
         None => zconned_stdio_types::MsgCursorSet {
@@ -852,18 +862,30 @@ pub async fn commit(thread_hex: Option<&str>, text: &str) -> Result<String, Stri
         {
             let id = entry_ref_id(entry);
             let row = entry_row(entry);
-            let thread = thread_hex
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| id.clone());
+            // THE THREAD id: for a FRESH commit the core generates the
+            // genesis parent (the cursor's fresh) — the thread is the
+            // entry's prev[0], NOT the entry's own ref (the message's
+            // digest is its own anchor; pulling the log by it pulls a
+            // thread that does not exist). Existing threads keep the
+            // caller's id.
+            let thread = thread_hex.map(|s| s.to_string()).unwrap_or_else(|| {
+                entry
+                    .prev
+                    .first()
+                    .map(|r| ref_id_of(entry.ver_major, entry.ver_minor, &r.algo, &r.digest))
+                    .unwrap_or_else(|| id.clone())
+            });
             let mut st = CORE.write();
             if !st.threads.iter().any(|t| t.id == thread) {
                 st.threads.push(ThreadRow { id: thread.clone() });
             }
-            let rows = st.logs.entry(thread).or_default();
+            let rows = st.logs.entry(thread.clone()).or_default();
             if rows.last() != Some(&row) {
                 rows.push(row);
             }
-            new_id = Some(id);
+            // the RETURNED id = the thread (the caller navigates to it;
+            // the message's own digest is NOT addressable as a thread)
+            new_id = Some(thread);
         }
     }
     new_id.ok_or_else(|| "commit answered without an entry".to_string())
@@ -910,6 +932,19 @@ pub fn relay_connect(url: String) {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = url;
+    }
+}
+
+/// TEMP diag: the worker's storage mirror + the last persist failure.
+pub fn storage_diag() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(port) = CTRL_PORT.get() {
+            trace("storage_diag: posting the diag face");
+            let _ = port.post_message(&JsValue::from_str(r#"{"t":"diag"}"#));
+        } else {
+            trace("storage_diag: NO CTRL PORT");
+        }
     }
 }
 

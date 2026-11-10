@@ -1,11 +1,27 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
+export const __wbg_intounderlyingbytesource_free: (a: number, b: number) => void;
+export const __wbg_intounderlyingsink_free: (a: number, b: number) => void;
+export const __wbg_intounderlyingsource_free: (a: number, b: number) => void;
+export const intounderlyingbytesource_autoAllocateChunkSize: (a: number) => number;
+export const intounderlyingbytesource_cancel: (a: number) => void;
+export const intounderlyingbytesource_pull: (a: number, b: any) => any;
+export const intounderlyingbytesource_start: (a: number, b: any) => void;
+export const intounderlyingbytesource_type: (a: number) => number;
+export const intounderlyingsink_abort: (a: number, b: any) => any;
+export const intounderlyingsink_close: (a: number) => any;
+export const intounderlyingsink_write: (a: number, b: any) => any;
+export const intounderlyingsource_cancel: (a: number) => void;
+export const intounderlyingsource_pull: (a: number, b: any) => any;
 export const tafy_worker_main: () => void;
+export const tafy_worker_storage_diag: () => void;
 export const tafy_worker_storage_selftest: () => void;
-export const wasm_bindgen_f46a8e7005748a90___convert__closures_____invoke___js_sys_8d224ca59892f7fb___Function_fn_wasm_bindgen_f46a8e7005748a90___JsValue_____wasm_bindgen_f46a8e7005748a90___sys__Undefined___js_sys_8d224ca59892f7fb___Function_fn_wasm_bindgen_f46a8e7005748a90___JsValue_____wasm_bindgen_f46a8e7005748a90___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
+export const wasm_bindgen_f46a8e7005748a90___convert__closures_____invoke___js_sys_1163be8f52484f0d___Function_fn_wasm_bindgen_f46a8e7005748a90___JsValue_____wasm_bindgen_f46a8e7005748a90___sys__Undefined___js_sys_1163be8f52484f0d___Function_fn_wasm_bindgen_f46a8e7005748a90___JsValue_____wasm_bindgen_f46a8e7005748a90___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
 export const wasm_bindgen_f46a8e7005748a90___convert__closures_____invoke___wasm_bindgen_f46a8e7005748a90___JsValue__core_ed718c3d60ebd546___result__Result_____wasm_bindgen_f46a8e7005748a90___JsError___true_: (a: number, b: number, c: any) => [number, number];
-export const wasm_bindgen_f46a8e7005748a90___convert__closures_____invoke___web_sys_8903779cb7957908___features__gen_MessageEvent__MessageEvent______true_: (a: number, b: number, c: any) => void;
+export const wasm_bindgen_f46a8e7005748a90___convert__closures_____invoke___wasm_bindgen_f46a8e7005748a90___JsValue______true_: (a: number, b: number, c: any) => void;
+export const wasm_bindgen_f46a8e7005748a90___convert__closures_____invoke___web_sys_131d7052e1a819a5___features__gen_MessageEvent__MessageEvent______true_: (a: number, b: number, c: any) => void;
+export const wasm_bindgen_f46a8e7005748a90___convert__closures_____invoke_______true_: (a: number, b: number) => void;
 export const __wbindgen_malloc: (a: number, b: number) => number;
 export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
 export const __wbindgen_free: (a: number, b: number, c: number) => void;

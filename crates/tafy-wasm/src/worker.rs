@@ -30,6 +30,7 @@ enum Ctrl {
     Boot { relay: String },
     Connect { relay: String },
     Disconnect,
+    Diag,
 }
 
 impl Ctrl {
@@ -43,15 +44,17 @@ impl Ctrl {
                 relay: v.get("relay").and_then(|r| r.as_str()).unwrap_or("").to_string(),
             }),
             "disconnect" => Some(Ctrl::Disconnect),
+            "diag" => Some(Ctrl::Diag),
             _ => None,
         }
     }
 }
 
-/// The worker→UI control faces (JSON on the control port).
-fn conn_face(scope: &web_sys::DedicatedWorkerGlobalScope, state: &str, detail: &str) {
+/// The worker→UI control faces: JSON on the CONTROL PORT (the UI's
+/// conn-state parser lives there; the scope route = breadcrumbs only).
+fn conn_face(port: &web_sys::MessagePort, state: &str, detail: &str) {
     let face = serde_json::json!({ "t": "conn", "state": state, "detail": detail });
-    let _ = scope.post_message(&JsValue::from_str(&face.to_string()));
+    let _ = port.post_message(&JsValue::from_str(&face.to_string()));
 }
 
 /// The wasm host's spawner: the pump runs on the wasm-bindgen-futures
@@ -160,6 +163,13 @@ async fn boot() -> Result<(), JsValue> {
     let reply = std::cell::RefCell::new(Some(port_tx));
     let reply_ctrl = std::cell::RefCell::new(Some(ctrl_port_tx));
     let onmessage = Closure::wrap(Box::new(move |e: web_sys::MessageEvent| {
+        // the diag string hook (TEMP): a plain string = a command
+        if let Some(raw) = e.data().as_string() {
+            if raw == "diag:storage" {
+                tafy_worker_storage_diag();
+                return;
+            }
+        }
         let ports = e.ports();
         for p in ports {
             if p.is_undefined() {
@@ -342,22 +352,39 @@ async fn boot() -> Result<(), JsValue> {
     let mut deframer = protobuf_varint_deframer::Deframer::builder().build();
     let mut chunk = [0u8; 4096];
     use tokio::io::AsyncReadExt as _;
-    let outbound = wasm_bindgen_futures::spawn_local(async move {
+    let scope_out = scope.clone();
+    let _outbound = wasm_bindgen_futures::spawn_local(async move {
         loop {
             match core_out_read.read(&mut chunk).await {
-                Ok(0) => break,
+                Ok(0) => {
+                    let _ = scope_out.post_message(&JsValue::from_str("[worker] core stdout EOF"));
+                    break;
+                }
                 Ok(n) => {
+                    // THE DRAIN (the reload-loss class bug, batch-1
+                    // residual): the deframer's feed stops at ONE
+                    // frame and leaves the rest of the read buffer
+                    // untouched — a pump's frames coalescing into a
+                    // single read used to DESTROY every frame after
+                    // the first (the commit pair: msg_added arrived,
+                    // its MsgDraftPush twin silently died -> the UI's
+                    // reply matcher hung forever). Feed until the
+                    // buffer is exhausted.
                     let mut data: &[u8] = &chunk[..n];
-                    match deframer.feed(&mut data) {
-                        Ok(frames) => {
-                            for frame in frames {
+                    loop {
+                        match deframer.feed(&mut data) {
+                            Ok(Some(frame)) => {
                                 let arr = js_sys::Uint8Array::from(frame.as_ref());
                                 let _ = port.post_message(&arr);
+                                if data.is_empty() {
+                                    break;
+                                }
                             }
-                        }
-                        Err(e) => {
-                            web_sys::console::error_1(&format!("deframe: {e}").into());
-                            break;
+                            Ok(None) => break, // the buffer is exhausted
+                            Err(e) => {
+                                web_sys::console::error_1(&format!("deframe: {e}").into());
+                                break;
+                            }
                         }
                     }
                 }
@@ -368,29 +395,32 @@ async fn boot() -> Result<(), JsValue> {
             }
         }
     });
-    drop(outbound); // the bridge lives for the worker's lifetime
-
-    // The control task: owns the transport; drives visits.
-    conn_face(&scope, "disconnected", "");
-    let scope_ctrl_task = scope.clone();
+    // The control task: owns the transport + the ctrl port; drives
+    // visits; the conn/diag faces ride the port (the UI parses them).
+    conn_face(&ctrl_port, "disconnected", "");
     wasm_bindgen_futures::spawn_local(async move {
         while let Some(cmd) = ctrl_rx.recv().await {
             match cmd {
                 Ctrl::Boot { .. } => {}
+                Ctrl::Diag => {
+                    let _ = ctrl_port.post_message(&JsValue::from_str("diag: START"));
+                    let text = crate::storage::diag_face().await;
+                    let _ = ctrl_port.post_message(&JsValue::from_str(&text));
+                }
                 Ctrl::Connect { relay } => {
-                    conn_face(&scope_ctrl_task, "connecting", &relay);
+                    conn_face(&ctrl_port, "connecting", &relay);
                     transport
                         .repoint(tafy_carrier::GrpcWebCarrier::new(relay));
                     match transport.visit().await {
-                        Ok(()) => conn_face(&scope_ctrl_task, "connected", ""),
+                        Ok(()) => conn_face(&ctrl_port, "connected", ""),
                         Err(e) => {
-                            conn_face(&scope_ctrl_task, "error", &e.to_string());
+                            conn_face(&ctrl_port, "error", &e.to_string());
                         }
                     }
                 }
                 Ctrl::Disconnect => {
                     transport.disconnect();
-                    conn_face(&scope_ctrl_task, "disconnected", "");
+                    conn_face(&ctrl_port, "disconnected", "");
                 }
             }
         }
@@ -535,4 +565,15 @@ async fn cleanup(root: &str, file: &str) {
         }
         let _ = dir.remove_entry(name).await;
     }
+}
+
+/// TEMP diag: the live store's mirror (files + sizes) + the last
+/// persistence failure — the reload-loss hunt's probe.
+#[wasm_bindgen]
+pub fn tafy_worker_storage_diag() {
+    wasm_bindgen_futures::spawn_local(async move {
+        let scope: web_sys::DedicatedWorkerGlobalScope = js_sys::global().unchecked_into();
+        let text = crate::storage::diag_face().await;
+        let _ = scope.post_message(&JsValue::from_str(&text));
+    });
 }
