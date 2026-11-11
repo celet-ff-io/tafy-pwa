@@ -591,22 +591,50 @@ fn route_statement(f: OutgoingFrame) {
     // second input when the confirmed-from display gets ruled — the
     // verdict stays ours (the core reports facts, never the
     // conjunction).
+    //
+    // THE THREAD: the arrival notice carries NO thread ref (the i2c
+    // arrival shape; the dumb-interface rule — the core reports
+    // facts, the interface re-pulls on demand). Derive what the
+    // chain gives: a prev[0] matching a known row places the
+    // arrival in that row's thread; anything else (a new thread or
+    // a chain gap) lands via a log re-pull — the store already has
+    // the landed facts, the pull is a request per loaded thread.
     if let F::MsgPackagePush(p) = f.frame.as_ref().unwrap()
         && let Some(pkg) = p.package.as_ref()
         && let Some(entry) = pkg.entry.as_ref()
     {
-        let id = entry_ref_id(entry);
         let row = entry_row(entry);
-        let mut st = CORE.write();
-        if !st.threads.iter().any(|t| t.id == id) {
-            st.threads.push(ThreadRow { id: id.clone() });
+        let prev_ref = entry
+            .prev
+            .first()
+            .map(|r| ref_id_of(entry.ver_major, entry.ver_minor, &r.algo, &r.digest));
+        let mut placed = false;
+        if let Some(prev) = &prev_ref {
+            let mut st = CORE.write();
+            for rows in st.logs.values_mut() {
+                if !rows.iter().any(|r| &r.ref_id == prev) {
+                    continue;
+                }
+                match rows.iter().position(|r| r.ref_id == row.ref_id) {
+                    Some(i) => rows[i] = row.clone(),
+                    None => rows.push(row.clone()),
+                }
+                placed = true;
+                break;
+            }
         }
-        let rows = st.logs.entry(id).or_default();
-        // upsert by digest: a re-push (roster change) REPLACES the
-        // row; a first sight appends
-        match rows.iter().position(|r| r.ref_id == row.ref_id) {
-            Some(i) => rows[i] = row,
-            None => rows.push(row),
+        if !placed {
+            let ids: Vec<String> = CORE.read().logs.keys().cloned().collect();
+            spawn_local(async move {
+                for id in ids {
+                    if let Ok(rows) = thread_log(&id).await {
+                        CORE.write().logs.insert(id, rows);
+                    }
+                }
+                if let Ok(ts) = threads().await {
+                    CORE.write().threads = ts;
+                }
+            });
         }
     }
 }

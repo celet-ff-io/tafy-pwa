@@ -20,9 +20,10 @@ mod imp {
     use futures::Stream;
     use futures::StreamExt as _;
     use send_wrapper::SendWrapper;
+    use tonic::Request;
     use zconned::transport::{Carrier, Error, MailSession, Result};
     use zconnor_mail_types::relay::mailbox_service_client::MailboxServiceClient;
-    use zconnor_mail_types::{mail, relay};
+    use zconnor_mail_types::{mail, relay, SESSION_TOKEN_HEADER};
 
     /// The connection factory: one gRPC-Web client per endpoint
     /// (the relay URL — https, grpc-web envelope).
@@ -51,8 +52,24 @@ mod imp {
             })
             .await;
             trace("carrier open exit");
-            Ok(GrpcWebSession(SendWrapper::new(made)))
+            Ok(GrpcWebSession(SendWrapper::new(made), None))
         }
+    }
+
+    /// Present the claim-issued credential: every session-bound call
+    /// carries it (the 106 mail-session batch — the relay
+    /// authenticates the session by the token, never by the
+    /// connection, so the tunnel's connection-hopping stays
+    /// harmless). A free fn because the token is captured into the
+    /// !Send call future ahead of the js state it rides.
+    fn present<T>(token: &Option<String>, inner: T) -> Request<T> {
+        let mut request = Request::new(inner);
+        if let Some(token) = token
+            && let Ok(value) = token.clone().try_into()
+        {
+            request.metadata_mut().insert(SESSION_TOKEN_HEADER, value);
+        }
+        request
     }
 
     /// The relay conversation: thin delegation over the generated
@@ -61,7 +78,13 @@ mod imp {
     /// is Send-wrapped: the wrapper's inner carries all the !Send
     /// js state, the outer promise stays honest.
     #[derive(Clone)]
-    pub struct GrpcWebSession(SendWrapper<MailboxServiceClient<tonic_web_wasm_client::Client>>);
+    pub struct GrpcWebSession(
+        SendWrapper<MailboxServiceClient<tonic_web_wasm_client::Client>>,
+        /// The claim-issued session credential, header-ready. `None`
+        /// until the claim succeeds; a superseding claim retires the
+        /// older token (re-claim, never cache).
+        Option<String>,
+    );
 
     /// The plane stream: the js-backed `tonic::Streaming` behind the
     /// Send bridge (Streaming is Unpin over its boxed inner), error-
@@ -179,25 +202,41 @@ mod imp {
                 let client = self.0.clone();
                 SendWrapper::new(async move {
                     let mut c = client;
-                    c.claim_mailbox(relay::ClaimMailboxRequest { anchor, claim_sig })
+                    let response = c
+                        .claim_mailbox(relay::ClaimMailboxRequest { anchor, claim_sig })
                         .await
                         .map_err(st)?;
-                    Ok(())
+                    let token = response
+                        .metadata()
+                        .get(SESSION_TOKEN_HEADER)
+                        .ok_or(Error::Call {
+                            message: "the claim reply carries no session token".into(),
+                        })?
+                        .to_str()
+                        .map_err(|_| Error::Call {
+                            message: "the session token header is not ASCII".into(),
+                        })?
+                        .to_owned();
+                    trace("claim_mailbox: session token acquired");
+                    Ok(token)
                 })
                 .await
             })()
             .await;
-            trace("claim_mailbox exit");
-            r
+            trace(&format!("claim_mailbox exit: {r:?}"));
+            r.map(|token| {
+                self.1 = Some(token);
+            })
         }
 
         async fn set_spk(&mut self, spk: mail::Spk) -> Result<()> {
             trace("set_spk enter");
+            let token = self.1.clone();
             let r = (|| async {
                 let client = self.0.clone();
                 SendWrapper::new(async move {
                     let mut c = client;
-                    c.set_spk(relay::SetSpkRequest { spk: Some(spk) })
+                    c.set_spk(present(&token, relay::SetSpkRequest { spk: Some(spk) }))
                         .await
                         .map_err(st)?;
                     Ok(())
@@ -211,11 +250,12 @@ mod imp {
 
         async fn set_opks(&mut self, opks: Vec<mail::Opk>) -> Result<()> {
             trace("set_opks enter");
+            let token = self.1.clone();
             let r = (|| async {
                 let client = self.0.clone();
                 SendWrapper::new(async move {
                     let mut c = client;
-                    c.set_opks(relay::SetOpksRequest { opks })
+                    c.set_opks(present(&token, relay::SetOpksRequest { opks }))
                         .await
                         .map_err(st)?;
                     Ok(())
@@ -247,11 +287,15 @@ mod imp {
 
         async fn send_transcript_mail(&mut self, mail: mail::Mail) -> Result<relay::MailReceipt> {
             trace("send_transcript_mail enter");
+            let token = self.1.clone();
             let r = (|| async {
                 let client = self.0.clone();
                 SendWrapper::new(async move {
                     let mut c = client;
-                    Ok(c.send_transcript_mail(mail).await.map_err(st)?.into_inner())
+                    Ok(c.send_transcript_mail(present(&token, mail))
+                        .await
+                        .map_err(st)?
+                        .into_inner())
                 })
                 .await
             })()
@@ -262,11 +306,15 @@ mod imp {
 
         async fn send_resources_mail(&mut self, mail: mail::Mail) -> Result<relay::MailReceipt> {
             trace("send_resources_mail enter");
+            let token = self.1.clone();
             let r = (|| async {
                 let client = self.0.clone();
                 SendWrapper::new(async move {
                     let mut c = client;
-                    Ok(c.send_resources_mail(mail).await.map_err(st)?.into_inner())
+                    Ok(c.send_resources_mail(present(&token, mail))
+                        .await
+                        .map_err(st)?
+                        .into_inner())
                 })
                 .await
             })()
@@ -277,11 +325,15 @@ mod imp {
 
         async fn send_signature_mail(&mut self, mail: mail::Mail) -> Result<relay::MailReceipt> {
             trace("send_signature_mail enter");
+            let token = self.1.clone();
             let r = (|| async {
                 let client = self.0.clone();
                 SendWrapper::new(async move {
                     let mut c = client;
-                    Ok(c.send_signature_mail(mail).await.map_err(st)?.into_inner())
+                    Ok(c.send_signature_mail(present(&token, mail))
+                        .await
+                        .map_err(st)?
+                        .into_inner())
                 })
                 .await
             })()
@@ -292,14 +344,15 @@ mod imp {
 
         async fn report_mail_received(&mut self, from_mailbox: Vec<u8>, up_to: u64) -> Result<()> {
             trace("report_mail_received enter");
+            let token = self.1.clone();
             let r = (|| async {
                 let client = self.0.clone();
                 SendWrapper::new(async move {
                     let mut c = client;
-                    c.report_mail_received(relay::ReportMailReceivedRequest {
-                        from_mailbox,
-                        up_to,
-                    })
+                    c.report_mail_received(present(
+                        &token,
+                        relay::ReportMailReceivedRequest { from_mailbox, up_to },
+                    ))
                     .await
                     .map_err(st)?;
                     Ok(())
@@ -312,10 +365,11 @@ mod imp {
         }
 
         async fn get_mail_cursors(&mut self) -> Result<Vec<relay::MailboxCursor>> {
+            let token = self.1.clone();
             let client = self.0.clone();
             SendWrapper::new(async move {
                 let mut c = client;
-                Ok(c.get_mail_cursors(relay::GetMailCursorsRequest {})
+                Ok(c.get_mail_cursors(present(&token, relay::GetMailCursorsRequest {}))
                     .await
                     .map_err(st)?
                     .into_inner()
@@ -326,11 +380,12 @@ mod imp {
 
         async fn transcript_plane(&mut self) -> Result<Self::Planes> {
             trace("transcript_plane enter");
+            let token = self.1.clone();
             let client = self.0.clone();
             SendWrapper::new(async move {
                 let mut c = client;
                 let stream = c
-                    .transcript_plane(relay::TranscriptPlaneRequest {})
+                    .transcript_plane(present(&token, relay::TranscriptPlaneRequest {}))
                     .await
                     .map_err(st)?
                     .into_inner();
@@ -341,11 +396,12 @@ mod imp {
 
         async fn resources_plane(&mut self) -> Result<Self::Planes> {
             trace("resources_plane enter");
+            let token = self.1.clone();
             let client = self.0.clone();
             SendWrapper::new(async move {
                 let mut c = client;
                 let stream = c
-                    .resources_plane(relay::ResourcesPlaneRequest {})
+                    .resources_plane(present(&token, relay::ResourcesPlaneRequest {}))
                     .await
                     .map_err(st)?
                     .into_inner();
@@ -356,11 +412,12 @@ mod imp {
 
         async fn signature_plane(&mut self) -> Result<Self::Planes> {
             trace("signature_plane enter");
+            let token = self.1.clone();
             let client = self.0.clone();
             SendWrapper::new(async move {
                 let mut c = client;
                 let stream = c
-                    .signature_plane(relay::SignaturePlaneRequest {})
+                    .signature_plane(present(&token, relay::SignaturePlaneRequest {}))
                     .await
                     .map_err(st)?
                     .into_inner();
