@@ -457,7 +457,9 @@ fn deploy_root(doc: &web_sys::Document) -> Option<String> {
         else {
             continue;
         };
-        let Some(src) = el.get_attribute("src") else { continue };
+        let Some(src) = el.get_attribute("src") else {
+            continue;
+        };
         if let Some(cut) = src.find("/assets/") {
             return Some(src[..cut].to_string());
         }
