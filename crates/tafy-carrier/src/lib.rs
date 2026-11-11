@@ -51,8 +51,7 @@ mod imp {
     async fn sleep_ms(ms: i32) {
         use web_sys::wasm_bindgen::JsCast as _;
         let p = js_sys::Promise::new(&mut |resolve, _| {
-            let scope: web_sys::DedicatedWorkerGlobalScope =
-                js_sys::global().unchecked_into();
+            let scope: web_sys::DedicatedWorkerGlobalScope = js_sys::global().unchecked_into();
             let _ = scope.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms);
         });
         let _ = SendWrapper::new(wasm_bindgen_futures::JsFuture::from(p)).await;

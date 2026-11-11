@@ -72,6 +72,11 @@ futures = "0.3"
 serde_json.workspace = true
 tafy-carrier = { path = "../tafy-carrier" }
 console_error_panic_hook = "0.1.7"
+# The Spawner::sleep bridge (106's pump-clock fix, dev e0bc536): the
+# pump cadences ride a host-owned timer; the js-bound sleep future is
+# !Send and the trait promises Send — the same single-threaded
+# SendWrapper pattern the carrier uses.
+send_wrapper = { version = "0.6", features = ["futures"] }
 
 # -- the runtime (the spike proved the current-thread runtime
 # executes spawn/mpsc/select/duplex on wasm32: design/s2-real-core/

@@ -3287,6 +3287,7 @@ dependencies = [
  "log",
  "prost",
  "protobuf-varint-deframer",
+ "send_wrapper",
  "serde_json",
  "tafy-carrier",
  "tokio",

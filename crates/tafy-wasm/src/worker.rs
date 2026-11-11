@@ -96,7 +96,12 @@ fn conn_face(port: &web_sys::MessagePort, state: &str, detail: &str) {
 /// spike proved tokio mpsc/select wake fine from JS microtasks).
 /// Abort = the spike-proven cancel combinator (flag + Notify under a
 /// select at the pump's next await point).
-struct WasmSpawner;
+struct WasmSpawner {
+    /// The pump counter: a dead pump must be NAMED (106's verdict §3
+    /// move 2) — the Spawner seam carries no name, so the spawn order
+    /// stands in for one.
+    counter: std::sync::atomic::AtomicUsize,
+}
 
 struct WasmPump {
     done: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -111,6 +116,26 @@ impl zconned::transport::PumpHandle for WasmPump {
 }
 
 impl zconned::transport::Spawner for WasmSpawner {
+    fn sleep(
+        &self,
+        dur: std::time::Duration,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+        // The host-owned clock (106's pump-clock fix, dev e0bc536):
+        // the pump cadences (the seal's 1s tick, the landing-escrow
+        // retry, the reseal scan) ride the worker's setTimeout timer
+        // through the same wasm_sleep bridge the visit gate uses. The
+        // js-bound future is !Send; the trait promises Send — the
+        // single-threaded SendWrapper pattern (sound under the wasm
+        // executor; the crate never runs off wasm).
+        // TEMP (retire list pending): the clock bridge's own traces.
+        let ms = dur.as_millis().min(i32::MAX as u128) as i32;
+        web_sys::console::log_1(&format!("[clock] sleep {}ms", ms).into());
+        Box::pin(send_wrapper::SendWrapper::new(async move {
+            let _ = wasm_sleep(ms).await;
+            web_sys::console::log_1(&"[clock] slept".into());
+        }))
+    }
+
     fn spawn(
         &self,
         pump: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>,
@@ -121,20 +146,78 @@ impl zconned::transport::Spawner for WasmSpawner {
             done: done.clone(),
             notify: notify.clone(),
         };
+        // A dead pump must be NAMED (106's verdict §3 move 2): a
+        // panicking pump would otherwise kill the spawn_local task
+        // silently. catch_unwind surfaces the death on the worker's
+        // console.error; the done flag still fires so the abort path
+        // stays sound. (The wasm build keeps the default unwind
+        // strategy — nothing in this workspace sets panic=abort.)
+        let n = self
+            .counter
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let name = format!("pump #{n}");
+        let done_death = done.clone();
         wasm_bindgen_futures::spawn_local(async move {
             let cancel = async {
                 notify.notified().await;
             };
-            futures::future::select(Box::pin(pump), Box::pin(cancel)).await;
-            done.store(true, std::sync::atomic::Ordering::SeqCst);
+            let outcome = futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(
+                futures::future::select(Box::pin(pump), Box::pin(cancel)),
+            ))
+            .await;
+            if let Err(payload) = outcome {
+                let msg = payload
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "opaque panic payload".into());
+                web_sys::console::error_1(
+                    &format!("PUMP DIED ({name}): {msg} — the transport is degraded; report this trace").into(),
+                );
+            }
+            done_death.store(true, std::sync::atomic::Ordering::SeqCst);
         });
         Box::new(handle)
     }
 }
 
+/// The worker's log face (106's verdict §3 move 1): the core's
+/// `log` warnings/errors reach the browser console — a silent arm
+/// (a dropped seal, a landing-escrow retry loop) now names itself
+/// in minutes instead of hours. warn/error → console.error; info
+/// → console.info; debug/trace dropped (the TEMP [carrier]/[io]
+/// traces are separate console faces). The core's seal pump warns
+/// `seal deferred: {e}` through this face since dev e0bc536.
+struct WorkerLogger;
+
+static LOGGER: WorkerLogger = WorkerLogger;
+
+impl log::Log for WorkerLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Info
+    }
+    fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        let line = format!("[{}] {}", record.level(), record.args());
+        match record.level() {
+            log::Level::Error | log::Level::Warn => {
+                web_sys::console::error_1(&line.into());
+            }
+            _ => web_sys::console::info_1(&line.into()),
+        }
+    }
+    fn flush(&self) {}
+}
+
 /// The worker's entry point (called by the JS glue once wasm is up).
 #[wasm_bindgen]
 pub fn tafy_worker_main() {
+    // The log face (installed once; a second wasm instantiation of
+    // the worker scope would hit the guard and keep the first face).
+    let _ = log::set_logger(&LOGGER)
+        .map(|_| log::set_max_level(log::LevelFilter::Info));
     // TEMP: a posting panic hook (a release-wasm panic = a bare trap;
     // the worker's console is unreachable from the page — surface the
     // message through the scope; production drops it silently)
@@ -339,7 +422,10 @@ async fn boot() -> Result<(), JsValue> {
         zconned::mail::Outbox::open_with("/tafy/store", storage_dyn)
             .map_err(|e| JsValue::from_str(&format!("outbox open: {e}")))?,
     );
-    let spawner: Arc<dyn zconned::transport::Spawner> = Arc::new(WasmSpawner);
+    let spawner: Arc<dyn zconned::transport::Spawner> =
+        Arc::new(WasmSpawner {
+            counter: std::sync::atomic::AtomicUsize::new(0),
+        });
     // an unset relay = a never-opened endpoint (visits are explicit;
     // the open would fail only if the UI asked for one)
     let endpoint = if relay.trim().is_empty() {
