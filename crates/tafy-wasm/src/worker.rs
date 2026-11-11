@@ -295,8 +295,6 @@ async fn boot() -> Result<(), JsValue> {
     // transport is built here ONCE and lives in the control task;
     // visit/repoint/disconnect drive it from the UI's faces.
     let storage_dyn: zconned::SharedStorage = storage;
-    let kit = zconned::session::ArrivalKit::open("/tafy/store", storage_dyn.clone())
-        .map_err(|e| JsValue::from_str(&format!("store open: {e}")))?;
     let keyring = zconned::mail::Keyring::open_with(
         "/tafy/store",
         storage_dyn.clone(),
@@ -305,16 +303,30 @@ async fn boot() -> Result<(), JsValue> {
         zconned::mail::DEFAULT_OPK_BURN_DEPTH,
     )
     .map_err(|e| JsValue::from_str(&format!("keyring open: {e}")))?;
-    let card = zconned::transport::peer_face_of(&keyring.public_set());
-    step("[worker] keyring open, card built");
+    // The peers book opens BEFORE the kit (B6-c1): the landing
+    // verifies record signatures against the SAME instance the
+    // transport upserts — one in-memory state.
+    let peers = Arc::new(
+        zconned::transport::PeerBook::open_with("/tafy/store", storage_dyn.clone())
+            .map_err(|e| JsValue::from_str(&format!("peers open: {e}")))?,
+    );
+    // The core's own identity: the card (the self_get answer) plus
+    // the detached record-signing capability (the commit-time
+    // endorsement; the day-one self-sign uses it silently).
+    let identity = zconned::session::Identity::builder()
+        .card(zconned::transport::peer_face_of(
+            &keyring.public_set(),
+            Some(keyring.record_sign_public_bytes()),
+        ))
+        .record_sign(keyring.record_signer())
+        .build();
+    step("[worker] keyring open, identity built");
+    let kit = zconned::session::ArrivalKit::open("/tafy/store", storage_dyn.clone(), peers.clone())
+        .map_err(|e| JsValue::from_str(&format!("store open: {e}")))?;
 
     let outbox = Arc::new(
-        zconned::mail::Outbox::open_with("/tafy/store", storage_dyn.clone())
+        zconned::mail::Outbox::open_with("/tafy/store", storage_dyn)
             .map_err(|e| JsValue::from_str(&format!("outbox open: {e}")))?,
-    );
-    let peers = Arc::new(
-        zconned::transport::PeerBook::open_with("/tafy/store", storage_dyn)
-            .map_err(|e| JsValue::from_str(&format!("peers open: {e}")))?,
     );
     let spawner: Arc<dyn zconned::transport::Spawner> = Arc::new(WasmSpawner);
     // an unset relay = a never-opened endpoint (visits are explicit;
@@ -330,6 +342,7 @@ async fn boot() -> Result<(), JsValue> {
         .keyring(Arc::new(std::sync::Mutex::new(keyring)))
         .landing(Box::new(zconned::session::RecordLanding::new(
             kit.store.clone(),
+            peers.clone(),
             kit.notices_tx.clone(),
         )))
         .outbox(outbox)
@@ -344,7 +357,7 @@ async fn boot() -> Result<(), JsValue> {
         let result = zconned::run_with_arrivals(
             kit,
             sender,
-            Some(card),
+            Some(identity),
             spawner,
             &mut core_in_read,
             core_out_write,

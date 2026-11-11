@@ -3270,6 +3270,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "zconned-crypto",
  "zconned-material",
  "zconned-stdio-types",
 ]

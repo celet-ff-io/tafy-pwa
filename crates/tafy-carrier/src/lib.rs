@@ -257,6 +257,15 @@ mod imp {
             .await
         }
 
+        async fn send_signature_mail(&mut self, mail: mail::Mail) -> Result<relay::MailReceipt> {
+            let client = self.0.clone();
+            SendWrapper::new(async move {
+                let mut c = client;
+                Ok(c.send_signature_mail(mail).await.map_err(st)?.into_inner())
+            })
+            .await
+        }
+
         async fn report_mail_received(&mut self, from_mailbox: Vec<u8>, up_to: u64) -> Result<()> {
             let client = self.0.clone();
             SendWrapper::new(async move {
@@ -307,6 +316,21 @@ mod imp {
                 let mut c = client;
                 let stream = c
                     .resources_plane(relay::ResourcesPlaneRequest {})
+                    .await
+                    .map_err(st)?
+                    .into_inner();
+                Ok(SendStream(SendWrapper::new(stream)).map(plane_item as _))
+            })
+            .await
+        }
+
+        async fn signature_plane(&mut self) -> Result<Self::Planes> {
+            trace("signature_plane enter");
+            let client = self.0.clone();
+            SendWrapper::new(async move {
+                let mut c = client;
+                let stream = c
+                    .signature_plane(relay::SignaturePlaneRequest {})
                     .await
                     .map_err(st)?
                     .into_inner();
@@ -383,6 +407,9 @@ mod imp {
         async fn send_resources_mail(&mut self, _mail: mail::Mail) -> Result<relay::MailReceipt> {
             never()
         }
+        async fn send_signature_mail(&mut self, _mail: mail::Mail) -> Result<relay::MailReceipt> {
+            never()
+        }
         async fn report_mail_received(
             &mut self,
             _from_mailbox: Vec<u8>,
@@ -397,6 +424,9 @@ mod imp {
             never()
         }
         async fn resources_plane(&mut self) -> Result<Self::Planes> {
+            never()
+        }
+        async fn signature_plane(&mut self) -> Result<Self::Planes> {
             never()
         }
     }

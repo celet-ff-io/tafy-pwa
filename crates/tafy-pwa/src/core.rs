@@ -88,6 +88,9 @@ pub struct LogRow {
 pub struct PeerRow {
     /// the display fingerprint: sign_pub's first 8 bytes, hex pairs
     pub fp: String,
+    /// the identity anchor (SHA3-256 of sign_pub, full hex) — the
+    /// join key against a row's meta.from (B6 §4)
+    pub anchor_hex: String,
     pub sign_algo: String,
     pub dh_algo: String,
     /// the peer's endpoint hints, verbatim
@@ -108,6 +111,8 @@ pub struct CoreState {
     pub error: Option<String>,
     /// the relay connection's live face
     pub conn: Conn,
+    /// the self core's identity anchor (full hex; None = no card yet)
+    pub self_anchor: Option<String>,
 }
 
 pub static CORE: GlobalSignal<CoreState> = Signal::global(CoreState::default);
@@ -179,9 +184,16 @@ fn entry_row(entry: &zconned_stdio_types::Entry) -> LogRow {
         .unwrap_or(0);
     LogRow {
         ref_id: entry_ref_id(entry),
-        // day one the only committer is the self core (peers arrive
-        // with the carrier leg, batch 3)
-        author: "Me".to_string(),
+        // B6 §4: the author = the store's observation of meta.from,
+        // joined against the PeerBook (the self anchor renders Me;
+        // the display name lives in the PeerBook's own face)
+        author: author_face(
+            entry
+                .meta
+                .as_ref()
+                .map(|m| m.from.as_slice())
+                .unwrap_or(&[]),
+        ),
         text,
         ts_ms,
     }
@@ -375,11 +387,49 @@ fn peer_row_of(peer: &zconned_stdio_types::Peer) -> Option<PeerRow> {
     let card = base64::engine::general_purpose::STANDARD.encode(peer.encode_to_vec());
     Some(PeerRow {
         fp,
+        anchor_hex: anchor_hex_of_peer(peer).unwrap_or_default(),
         sign_algo: peer.sign_algo.clone(),
         dh_algo: peer.dh_algo.clone(),
         endpoints: peer.endpoints.clone(),
         card,
     })
+}
+
+/// The identity anchor (SHA3-256 of sign_pub) as full lowercase hex.
+fn anchor_hex_of_peer(peer: &zconned_stdio_types::Peer) -> Option<String> {
+    let mut sign = [0u8; 32];
+    if peer.sign_pub.len() != 32 {
+        return None;
+    }
+    sign.copy_from_slice(&peer.sign_pub);
+    Some(
+        zconned_crypto::Fingerprint::of(&sign)
+            .digest()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect(),
+    )
+}
+
+/// The row author's display face (B6 §4): meta.from = the author's
+/// mailbox anchor as the store observed it. The join is against the
+/// UI's PeerBook; the self anchor renders "Me"; a stranger shows the
+/// short anchor; an absent anchor renders the bare dash (missing =
+/// fact, the committing core had no mail identity).
+fn author_face(from: &[u8]) -> String {
+    if from.is_empty() {
+        return "—".to_string();
+    }
+    let hex: String = from.iter().map(|b| format!("{b:02x}")).collect();
+    let st = CORE.read();
+    if st.self_anchor.as_deref() == Some(hex.as_str()) {
+        return "Me".to_string();
+    }
+    if let Some(p) = st.peers.iter().find(|p| p.anchor_hex == hex) {
+        return p.fp.clone();
+    }
+    // stranger: the short anchor form (the first six bytes)
+    format!("{}…", &hex[..12])
 }
 
 fn set_peers(st: &mut CoreState, peers: &[zconned_stdio_types::Peer]) {
@@ -391,6 +441,13 @@ fn set_peers(st: &mut CoreState, peers: &[zconned_stdio_types::Peer]) {
 /// peer_set receipt AND the resting set) + batch-3 arrivals later.
 fn route_statement(f: OutgoingFrame) {
     use zconned_stdio_types::outgoing_frame::Frame as F;
+    // B6 §2: the signers roster rides its own channel. The UI shows
+    // no confirmation face yet — a silent push (or its absence) is
+    // the honest no-op; the roster snapshot rides msg_signers_get
+    // when the display feature is ruled.
+    if let F::MsgSignersPush(_) = f.frame.as_ref().unwrap() {
+        return;
+    }
     if let F::PeersPush(p) = f.frame.as_ref().unwrap() {
         set_peers(&mut CORE.write(), &p.peers);
         return;
@@ -650,7 +707,17 @@ async fn run_client() -> Result<(), String> {
     {
         for f in frames {
             if let Some(zconned_stdio_types::outgoing_frame::Frame::SelfPush(p)) = f.frame {
-                CORE.write().self_card = Some(p.card);
+                use base64::Engine as _;
+                // the self anchor joins against meta.from in the
+                // author face (B6 §4) — decode the card back to Peer
+                let self_anchor = base64::engine::general_purpose::STANDARD
+                    .decode(p.card.as_bytes())
+                    .ok()
+                    .and_then(|b| zconned_stdio_types::Peer::decode(&b[..]).ok())
+                    .and_then(|peer| anchor_hex_of_peer(&peer));
+                let mut st = CORE.write();
+                st.self_card = Some(p.card);
+                st.self_anchor = self_anchor;
             }
         }
     }

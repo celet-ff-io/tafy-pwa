@@ -42,6 +42,7 @@ prost = "0.14.4"
 base64 = "0.22"
 zconned-stdio-types = { path = "local-deps/zconn/crates/zconned-stdio-types" }
 zconned-material = { path = "local-deps/zconn/crates/zconned-material" }
+zconned-crypto = { path = "local-deps/zconn/crates/zconned-crypto" }
 # the wasm host's face of the core (tafy-wasm inherits these)
 zconned = { path = "local-deps/zconn/crates/zconned", default-features = false }
 zconned-io-link = { path = "local-deps/zconn/crates/zconned-io-link" }
