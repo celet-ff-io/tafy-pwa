@@ -23,7 +23,7 @@ mod imp {
     use tonic::Request;
     use zconned::transport::{Carrier, Error, MailSession, Result};
     use zconnor_mail_types::relay::mailbox_service_client::MailboxServiceClient;
-    use zconnor_mail_types::{mail, relay, SESSION_TOKEN_HEADER};
+    use zconnor_mail_types::{SESSION_TOKEN_HEADER, mail, relay};
 
     /// The connection factory: one gRPC-Web client per endpoint
     /// (the relay URL — https, grpc-web envelope).
@@ -351,7 +351,10 @@ mod imp {
                     let mut c = client;
                     c.report_mail_received(present(
                         &token,
-                        relay::ReportMailReceivedRequest { from_mailbox, up_to },
+                        relay::ReportMailReceivedRequest {
+                            from_mailbox,
+                            up_to,
+                        },
                     ))
                     .await
                     .map_err(st)?;
@@ -369,11 +372,13 @@ mod imp {
             let client = self.0.clone();
             SendWrapper::new(async move {
                 let mut c = client;
-                Ok(c.get_mail_cursors(present(&token, relay::GetMailCursorsRequest {}))
-                    .await
-                    .map_err(st)?
-                    .into_inner()
-                    .outbox)
+                Ok(
+                    c.get_mail_cursors(present(&token, relay::GetMailCursorsRequest {}))
+                        .await
+                        .map_err(st)?
+                        .into_inner()
+                        .outbox,
+                )
             })
             .await
         }
