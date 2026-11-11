@@ -183,7 +183,12 @@ fn parse_ref_id(id: &str) -> Option<zconned_material::MsgRef> {
 // representable range, no Y2038-class hazard).
 fn chrono_millis(s: &str) -> Option<u64> {
     let b = s.as_bytes();
-    if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' || b[16] != b':'
+    if b.len() < 20
+        || b[4] != b'-'
+        || b[7] != b'-'
+        || b[10] != b'T'
+        || b[13] != b':'
+        || b[16] != b':'
     {
         return None;
     }
@@ -244,8 +249,7 @@ fn chrono_millis(s: &str) -> Option<u64> {
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146_097 + doe - 719_468;
     let secs = days * 86_400 + h as i64 * 3600 + mi as i64 * 60 + se as i64;
-    (secs >= 0)
-        .then(|| (secs as u64) * 1000 + millis)
+    (secs >= 0).then(|| (secs as u64) * 1000 + millis)
 }
 
 fn entry_row(entry: &zconned_stdio_types::Entry) -> LogRow {
@@ -1220,9 +1224,18 @@ mod ts_claim_tests {
     #[test]
     fn rfc3339_utc_parses() {
         // cross-checked against an independent epoch calculator
-        assert_eq!(chrono_millis("2026-11-11T08:47:00.123Z"), Some(1_794_386_820_123));
-        assert_eq!(chrono_millis("2026-11-11T08:47:00Z"), Some(1_794_386_820_000));
-        assert_eq!(chrono_millis("2024-02-29T00:00:00Z"), Some(1_709_164_800_000));
+        assert_eq!(
+            chrono_millis("2026-11-11T08:47:00.123Z"),
+            Some(1_794_386_820_123)
+        );
+        assert_eq!(
+            chrono_millis("2026-11-11T08:47:00Z"),
+            Some(1_794_386_820_000)
+        );
+        assert_eq!(
+            chrono_millis("2024-02-29T00:00:00Z"),
+            Some(1_709_164_800_000)
+        );
         assert_eq!(chrono_millis("1970-01-01T00:00:00Z"), Some(0));
         assert_eq!(chrono_millis("2026-11-11T08:47:00+01:00"), None);
         assert_eq!(chrono_millis("2026-02-29T00:00:00Z"), None);
