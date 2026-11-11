@@ -42,6 +42,7 @@ mod imp {
         type Session = GrpcWebSession;
 
         async fn open(&self) -> Result<Self::Session> {
+            trace("carrier open enter");
             let endpoint = self.endpoint.clone();
             // the js-bound construction itself rides the bridge
             let made = SendWrapper::new(async move {
@@ -49,6 +50,7 @@ mod imp {
                 MailboxServiceClient::new(channel)
             })
             .await;
+            trace("carrier open exit");
             Ok(GrpcWebSession(SendWrapper::new(made)))
         }
     }
@@ -106,82 +108,123 @@ mod imp {
         }
     }
 
+    // TEMP diagnostic (retire list pending): the visit call ladder.
+    fn trace(s: &str) {
+        web_sys::console::log_1(&format!("[carrier] {s}").into());
+    }
+
     impl MailSession for GrpcWebSession {
         type Planes = GrpcWebPlanes;
 
         async fn get_version(&mut self) -> Result<u32> {
-            let client = self.0.clone();
-            SendWrapper::new(async move {
-                let mut c = client;
-                Ok(c.get_version(relay::GetVersionRequest {})
-                    .await
-                    .map_err(st)?
-                    .into_inner()
-                    .version)
-            })
-            .await
+            trace("get_version enter");
+            let r = (|| async {
+                let client = self.0.clone();
+                SendWrapper::new(async move {
+                    let mut c = client;
+                    Ok(c.get_version(relay::GetVersionRequest {})
+                        .await
+                        .map_err(st)?
+                        .into_inner()
+                        .version)
+                })
+                .await
+            })()
+            .await;
+            trace(&format!("get_version exit: {r:?}"));
+            r
         }
 
         async fn register_mailbox(&mut self, mailbox: mail::MailboxPublicSet) -> Result<()> {
-            let client = self.0.clone();
-            SendWrapper::new(async move {
-                let mut c = client;
-                c.register_mailbox(relay::RegisterMailboxRequest {
-                    mailbox: Some(mailbox),
+            trace("register_mailbox enter");
+            let r = (|| async {
+                let client = self.0.clone();
+                SendWrapper::new(async move {
+                    let mut c = client;
+                    c.register_mailbox(relay::RegisterMailboxRequest {
+                        mailbox: Some(mailbox),
+                    })
+                    .await
+                    .map_err(st)?;
+                    Ok(())
                 })
                 .await
-                .map_err(st)?;
-                Ok(())
-            })
-            .await
+            })()
+            .await;
+            trace("register_mailbox exit");
+            r
         }
 
         async fn get_challenge(&mut self) -> Result<relay::Challenge> {
-            let client = self.0.clone();
-            SendWrapper::new(async move {
-                let mut c = client;
-                Ok(c.get_challenge(relay::GetChallengeRequest {})
-                    .await
-                    .map_err(st)?
-                    .into_inner())
-            })
-            .await
+            trace("get_challenge enter");
+            let r = (|| async {
+                let client = self.0.clone();
+                SendWrapper::new(async move {
+                    let mut c = client;
+                    Ok(c.get_challenge(relay::GetChallengeRequest {})
+                        .await
+                        .map_err(st)?
+                        .into_inner())
+                })
+                .await
+            })()
+            .await;
+            trace("get_challenge exit");
+            r
         }
 
         async fn claim_mailbox(&mut self, anchor: Vec<u8>, claim_sig: Vec<u8>) -> Result<()> {
-            let client = self.0.clone();
-            SendWrapper::new(async move {
-                let mut c = client;
-                c.claim_mailbox(relay::ClaimMailboxRequest { anchor, claim_sig })
-                    .await
-                    .map_err(st)?;
-                Ok(())
-            })
-            .await
+            trace("claim_mailbox enter");
+            let r = (|| async {
+                let client = self.0.clone();
+                SendWrapper::new(async move {
+                    let mut c = client;
+                    c.claim_mailbox(relay::ClaimMailboxRequest { anchor, claim_sig })
+                        .await
+                        .map_err(st)?;
+                    Ok(())
+                })
+                .await
+            })()
+            .await;
+            trace("claim_mailbox exit");
+            r
         }
 
         async fn set_spk(&mut self, spk: mail::Spk) -> Result<()> {
-            let client = self.0.clone();
-            SendWrapper::new(async move {
-                let mut c = client;
-                c.set_spk(relay::SetSpkRequest { spk: Some(spk) })
-                    .await
-                    .map_err(st)?;
-                Ok(())
-            })
-            .await
+            trace("set_spk enter");
+            let r = (|| async {
+                let client = self.0.clone();
+                SendWrapper::new(async move {
+                    let mut c = client;
+                    c.set_spk(relay::SetSpkRequest { spk: Some(spk) })
+                        .await
+                        .map_err(st)?;
+                    Ok(())
+                })
+                .await
+            })()
+            .await;
+            trace("set_spk exit");
+            r
         }
 
         async fn set_opks(&mut self, opks: Vec<mail::Opk>) -> Result<()> {
-            let client = self.0.clone();
-            SendWrapper::new(async move {
-                let mut c = client;
-                c.set_opks(relay::SetOpksRequest { opks })
-                    .await
-                    .map_err(st)?;
-                Ok(())
-            })
-            .await
+            trace("set_opks enter");
+            let r = (|| async {
+                let client = self.0.clone();
+                SendWrapper::new(async move {
+                    let mut c = client;
+                    c.set_opks(relay::SetOpksRequest { opks })
+                        .await
+                        .map_err(st)?;
+                    Ok(())
+                })
+                .await
+            })()
+            .await;
+            trace("set_opks exit");
+            r
         }
 
         async fn get_bundle(&mut self, mailbox: Vec<u8>) -> Result<relay::Bundle> {
@@ -243,6 +286,7 @@ mod imp {
         }
 
         async fn transcript_plane(&mut self) -> Result<Self::Planes> {
+            trace("transcript_plane enter");
             let client = self.0.clone();
             SendWrapper::new(async move {
                 let mut c = client;
@@ -257,6 +301,7 @@ mod imp {
         }
 
         async fn resources_plane(&mut self) -> Result<Self::Planes> {
+            trace("resources_plane enter");
             let client = self.0.clone();
             SendWrapper::new(async move {
                 let mut c = client;

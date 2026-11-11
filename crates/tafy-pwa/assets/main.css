@@ -286,6 +286,10 @@ body {
   gap: 2px;
 }
 
+.relay-strip.live {
+  cursor: pointer;
+}
+
 .relay-line {
   font-size: 11px;
   color: var(--dim);

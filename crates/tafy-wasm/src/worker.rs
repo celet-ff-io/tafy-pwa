@@ -33,6 +33,24 @@ enum Ctrl {
     Diag,
 }
 
+/// A wasm sleep (tokio's time driver is off on wasm32): a Promise
+/// resolved by the worker scope's setTimeout.
+fn wasm_sleep(ms: i32) -> wasm_bindgen_futures::JsFuture {
+    let p = js_sys::Promise::new(&mut |resolve, _| {
+        let scope: web_sys::DedicatedWorkerGlobalScope = js_sys::global().unchecked_into();
+        let _ = scope.set_timeout_with_callback_and_timeout_and_arguments_0(
+            &resolve,
+            ms,
+        );
+    });
+    wasm_bindgen_futures::JsFuture::from(p)
+}
+
+// The visit gate: a relay whose plane streams never flush their
+// response headers (the live-relay finding, reported upstream) holds
+// the visit future forever — the face must fail loudly, not hang.
+const VISIT_TIMEOUT_MS: i32 = 45_000;
+
 impl Ctrl {
     fn parse(raw: &str) -> Option<Self> {
         let v: serde_json::Value = serde_json::from_str(raw).ok()?;
@@ -418,10 +436,21 @@ async fn boot() -> Result<(), JsValue> {
                 Ctrl::Connect { relay } => {
                     conn_face(&ctrl_port, "connecting", &relay);
                     transport.repoint(tafy_carrier::GrpcWebCarrier::new(relay));
-                    match transport.visit().await {
-                        Ok(()) => conn_face(&ctrl_port, "connected", ""),
-                        Err(e) => {
-                            conn_face(&ctrl_port, "error", &e.to_string());
+                    // THE VISIT GATE: the ceremony normally returns in
+                    // seconds; a relay whose plane streams never flush
+                    // (reported upstream) holds visit() forever — the
+                    // dropped future aborts its fetch (the client's
+                    // abort guard), the face fails loudly, the queued
+                    // mail stays for the next visit.
+                    tokio::select! {
+                        r = transport.visit() => match r {
+                            Ok(()) => conn_face(&ctrl_port, "connected", ""),
+                            Err(e) => {
+                                conn_face(&ctrl_port, "error", &e.to_string());
+                            }
+                        },
+                        _ = wasm_sleep(VISIT_TIMEOUT_MS) => {
+                            conn_face(&ctrl_port, "error", "the visit ran past 45s — the relay's plane stream never answered (reported upstream)");
                         }
                     }
                 }

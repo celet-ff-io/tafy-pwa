@@ -3250,6 +3250,7 @@ dependencies = [
  "send_wrapper",
  "tonic",
  "tonic-web-wasm-client",
+ "web-sys",
  "zconned",
  "zconnor-mail-types",
 ]

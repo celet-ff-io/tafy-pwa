@@ -79,7 +79,7 @@ fn conn_sub(conn: &core::Conn) -> &'static str {
     match conn {
         // the protocol's persist-then-queue: an unvisited commit
         // re-enters the seal task at the next visit
-        core::Conn::Connected => "sending through the relay",
+        core::Conn::Connected => "sending through the relay — tap to end the visit",
         _ => "messages queue on this device until the next visit",
     }
 }
@@ -781,12 +781,17 @@ fn ThreadPage(id: String) -> Element {
     let submit = move |e: dioxus::prelude::Event<dioxus::prelude::FormData>| {
         e.prevent_default();
         let text = draft().trim().to_string();
+        // TEMP trace (retire list pending): wasm32-only — web-sys is
+        // a wasm32-gated dep, the native check face must stay clean
+        #[cfg(target_arch = "wasm32")]
         web_sys::console::log_1(&format!("[composer] submit: len={}", text.len()).into());
         if text.is_empty() || sending() {
+            #[cfg(target_arch = "wasm32")]
             web_sys::console::log_1(&"[composer] submit: rejected (empty or in-flight)".into());
             return;
         }
         sending.set(true);
+        #[cfg(target_arch = "wasm32")]
         web_sys::console::log_1(&"[composer] submit: accepted, spawning commit".into());
         let id = id_for_send.clone();
         let new = is_new;
@@ -842,7 +847,15 @@ fn ThreadPage(id: String) -> Element {
                 }
             }
             form { class: "composer", onsubmit: submit,
-                div { class: "relay-strip",
+                div {
+                    class: if matches!(core::CORE.read().conn, core::Conn::Connected) { "relay-strip live" } else { "relay-strip" },
+                    // the connected strip = the visit's end face (the
+                    // disconnect verb was dead until this affordance)
+                    onclick: move |_| {
+                        if matches!(core::CORE.read().conn, core::Conn::Connected) {
+                            core::relay_disconnect();
+                        }
+                    },
                     span { class: conn_class(&core::CORE.read().conn), "{conn_face(&core::CORE.read().conn, relay_saved().trim().is_empty())}" }
                     span { class: "relay-sub", "{conn_sub(&core::CORE.read().conn)}" }
                 }
