@@ -75,6 +75,34 @@ fn conn_class(conn: &core::Conn) -> &'static str {
     }
 }
 
+/// The strip's first-line face: a BOOT failure outranks the conn
+/// face (a failed boot is why there is no conn at all — the honest
+/// face for the deep-link spawn failure that used to sit silently at
+/// 'not connected').
+fn strip_face() -> String {
+    if let core::Status::Failed(e) = &core::CORE.read().status {
+        return format!("boot: failed ✗ {e}");
+    }
+    conn_face(&core::CORE.read().conn, relay_saved().trim().is_empty())
+}
+
+/// The strip's class for the first-line face (the boot failure gets
+/// the bad face too).
+fn strip_class() -> &'static str {
+    if matches!(core::CORE.read().status, core::Status::Failed(_)) {
+        return "relay-line bad";
+    }
+    conn_class(&core::CORE.read().conn)
+}
+
+/// The strip's second-line face.
+fn strip_sub() -> &'static str {
+    if matches!(core::CORE.read().status, core::Status::Failed(_)) {
+        return "the core failed to boot — reload the page (the console carries the detail)";
+    }
+    conn_sub(&core::CORE.read().conn)
+}
+
 fn conn_sub(conn: &core::Conn) -> &'static str {
     match conn {
         // the protocol's persist-then-queue: an unvisited commit
@@ -856,8 +884,8 @@ fn ThreadPage(id: String) -> Element {
                             core::relay_disconnect();
                         }
                     },
-                    span { class: conn_class(&core::CORE.read().conn), "{conn_face(&core::CORE.read().conn, relay_saved().trim().is_empty())}" }
-                    span { class: "relay-sub", "{conn_sub(&core::CORE.read().conn)}" }
+                    span { class: strip_class(), "{strip_face()}" }
+                    span { class: "relay-sub", "{strip_sub()}" }
                 }
                 div { class: "field",
                     input { r#type: "text", placeholder: if is_new { "First message" } else { "Message" },

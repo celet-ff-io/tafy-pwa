@@ -443,6 +443,28 @@ static BOOT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 static OPS: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<Req>> =
     std::sync::OnceLock::new();
 
+/// The deploy root: the first `script[src]` that carries dx's
+/// `/assets/` prefix, cut just before it. The dx entry script is the
+/// one stable anchor of the build's base_path (Dioxus.toml) — relative
+/// srcs (`./pwa.js`) and scripts without the prefix are skipped.
+#[cfg(target_arch = "wasm32")]
+fn deploy_root(doc: &web_sys::Document) -> Option<String> {
+    let scripts = doc.query_selector_all("script[src]").ok()?;
+    for i in 0..scripts.length() {
+        let Some(el) = scripts
+            .get(i)
+            .and_then(|n| n.dyn_ref::<web_sys::Element>().cloned())
+        else {
+            continue;
+        };
+        let Some(src) = el.get_attribute("src") else { continue };
+        if let Some(cut) = src.find("/assets/") {
+            return Some(src[..cut].to_string());
+        }
+    }
+    None
+}
+
 /// Boot the client once (the App calls this in an effect).
 pub fn boot() {
     if BOOT.set(()).is_err() {
@@ -462,20 +484,28 @@ async fn run_client() -> Result<(), String> {
     std::panic::set_hook(Box::new(|info| {
         web_sys::console::error_1(&format!("[panic] {info}").into());
     }));
-    // the worker URL resolves against the DOCUMENT base (the page
-    // lives under /tafy/ on gh-pages — a router path must not bend
-    // the relative resolution)
+    // THE DEPLOY ROOT, from a stable anchor: the dx entry script's
+    // src carries the build's base_path prefix (Dioxus.toml
+    // `base_path`, baked into <script src="{base}/assets/..."> at
+    // build time). The DOCUMENT base cannot serve: without a <base>
+    // tag, base_uri() is the document URL itself, and on a router
+    // deep-link (/tafy/thread/new) that IS the deep path — the
+    // worker URL resolved to /tafy/thread/new/tafy-core/... = 404
+    // and the boot died silently at 'not connected' (the deep-link
+    // boot bug, found in the 2026-11-11 live-relay round).
     let doc = web_sys::window()
         .ok_or("no window")?
         .document()
         .ok_or("no document")?;
-    let base = doc
-        .base_uri()
-        .ok()
-        .flatten()
-        .ok_or("no base uri")?
-        .trim_end_matches('/')
-        .to_string();
+    let base = deploy_root(&doc).unwrap_or_else(|| {
+        // the old derivation as the fallback (works at the root page)
+        doc.base_uri()
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+            .trim_end_matches('/')
+            .to_string()
+    });
     let url = format!("{base}/tafy-core/tafy-worker.js");
 
     let opts = web_sys::WorkerOptions::new();
