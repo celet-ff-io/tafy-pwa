@@ -197,8 +197,12 @@ fn spawn_core(storage: Arc<dyn Storage>, card: bool) -> Link {
         }
     });
 
-    // the core: the same calls the worker's boot makes
-    let kit = zconned::session::ArrivalKit::open("/tafy/store", storage.clone()).unwrap();
+    // the core: the same calls the worker's boot makes (B6 shape:
+    // peers-before-kit, the Identity card + record signer)
+    let peers =
+        Arc::new(zconned::transport::PeerBook::open_with("/tafy/store", storage.clone()).unwrap());
+    let kit =
+        zconned::session::ArrivalKit::open("/tafy/store", storage.clone(), peers.clone()).unwrap();
     let keyring = zconned::mail::Keyring::open_with(
         "/tafy/store",
         storage,
@@ -207,8 +211,16 @@ fn spawn_core(storage: Arc<dyn Storage>, card: bool) -> Link {
         zconned::mail::DEFAULT_OPK_BURN_DEPTH,
     )
     .unwrap();
-    let card_opt = if card {
-        Some(zconned::transport::peer_face_of(&keyring.public_set()))
+    let identity_opt = if card {
+        Some(
+            zconned::session::Identity::builder()
+                .card(zconned::transport::peer_face_of(
+                    &keyring.public_set(),
+                    Some(keyring.record_sign_public_bytes()),
+                ))
+                .record_sign(keyring.record_signer())
+                .build(),
+        )
     } else {
         None
     };
@@ -218,7 +230,7 @@ fn spawn_core(storage: Arc<dyn Storage>, card: bool) -> Link {
         let _ = zconned::run_with_arrivals(
             kit,
             sender,
-            card_opt,
+            identity_opt,
             Arc::new(zconned::transport::TokioSpawner),
             &mut rd,
             core_out_w,
@@ -235,7 +247,7 @@ fn spawn_core(storage: Arc<dyn Storage>, card: bool) -> Link {
 fn frame_tag(f: &OutgoingFrame) -> &'static str {
     use zconned_stdio_types::outgoing_frame::Frame as F;
     match &f.frame {
-        Some(F::MsgAdded(_)) => "msg_added",
+        Some(F::MsgPackagePush(_)) => "msg_package_push",
         Some(F::MsgCursorPush(_)) => "msg_cursor_push",
         Some(F::MsgDraftPush(_)) => "msg_draft_push",
         Some(F::MsgThreadsPush(_)) => "msg_threads_push",
@@ -308,7 +320,8 @@ async fn host_loop_handshake_identity_threads_commit() {
 
             // -- the fresh commit chain: cursor fresh -> content ->
             // commit (the core stamps the registry claims and answers
-            // the pair: msg_added + the resting draft) --
+            // the B7 pair: msg_package_push (complete roster) + the
+            // resting draft) --
             link.send(&IncomingFrame {
                 method: Some(zconned_stdio_types::incoming_frame::Method::MsgCursorSet(
                     zconned_stdio_types::MsgCursorSet {
@@ -349,7 +362,7 @@ async fn host_loop_handshake_identity_threads_commit() {
             let f1 = link.recv().await;
             assert_eq!(
                 frame_tag(&f1),
-                "msg_added",
+                "msg_package_push",
                 "commit's first answer wrong: {f1:?}"
             );
             let f2 = link.recv().await;

@@ -7,8 +7,9 @@
 // (IncomingFrame UI->core, OutgoingFrame core->UI). The client is
 // SINGLE-FLIGHT (the stdio grammar is one op at a time): answers pair
 // with the pending request; statements route to the broadcast state.
-// A commit returns TWO frames — msg_added + the resting draft —
-// returned by the API as one pair.
+// A commit returns TWO frames — msg_package_push + the resting draft —
+// returned by the API as one pair (B7: the package carries the
+// complete roster; MsgAdded is retired).
 //
 // Day-one content kind = "text/plain"; the ts claim
 // (application/vnd.zconn.ts) is stamped by the core at commit.
@@ -212,13 +213,15 @@ fn entry_row(entry: &zconned_stdio_types::Entry) -> LogRow {
 enum Expect {
     /// exactly one answer frame of this shape
     One(AnswerKind),
-    /// the commit pair: msg_added + the resting draft (MsgDraftPush)
+    /// the commit pair: msg_package_push + the resting draft
+    /// (MsgDraftPush) — B7 E1: the self-signature lands with the
+    /// msg, so the package carries the COMPLETE roster
     Commit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum AnswerKind {
-    MsgAdded,
+    MsgPackagePush,
     MsgCursorPush,
     MsgDraftPush,
     MsgThreadsPush,
@@ -230,7 +233,7 @@ enum AnswerKind {
 fn answer_kind(f: &OutgoingFrame) -> Option<AnswerKind> {
     use zconned_stdio_types::outgoing_frame::Frame as F;
     match f.frame.as_ref()? {
-        F::MsgAdded(_) => Some(AnswerKind::MsgAdded),
+        F::MsgPackagePush(_) => Some(AnswerKind::MsgPackagePush),
         F::MsgCursorPush(_) => Some(AnswerKind::MsgCursorPush),
         F::MsgDraftPush(_) => Some(AnswerKind::MsgDraftPush),
         F::MsgThreadsPush(_) => Some(AnswerKind::MsgThreadsPush),
@@ -336,14 +339,25 @@ impl CoreIo {
                         continue;
                     }
                     match pending.take() {
-                        None => route_statement(f),
+                        None => {
+                            // TEMP io probe (retire list pending)
+                            trace(&format!("[io] statement routed: {}B", bytes.len()));
+                            route_statement(f);
+                        }
                         Some((expect, reply, mut acc)) => {
                             let matches = match (&expect, answer_kind(&f)) {
                                 (Expect::One(want), Some(got)) => got == *want,
-                                (Expect::Commit, Some(AnswerKind::MsgAdded)) => acc.is_empty(),
+                                (Expect::Commit, Some(AnswerKind::MsgPackagePush)) => acc.is_empty(),
                                 (Expect::Commit, Some(AnswerKind::MsgDraftPush)) => !acc.is_empty(),
                                 _ => false,
                             };
+                            // TEMP io probe (retire list pending)
+                            trace(&format!(
+                                "[io] frame {}B kind={:?} expect={:?} matches={matches}",
+                                bytes.len(),
+                                answer_kind(&f),
+                                std::mem::discriminant(&expect)
+                            ));
                             if matches {
                                 acc.push(f);
                                 let done = match &expect {
@@ -444,22 +458,13 @@ fn set_peers(st: &mut CoreState, peers: &[zconned_stdio_types::Peer]) {
     st.peers = peers.iter().filter_map(peer_row_of).collect();
 }
 
-/// Unsolicited frames: the statement bus. Day one = commit receipts
-/// for ops whose reply consumer is gone + PeersPush (dual-role: the
-/// peer_set receipt AND the resting set) + batch-3 arrivals later.
+/// Unsolicited frames: the statement bus. B7: the msg domain speaks
+/// ONE frame — every MsgPackagePush (arrival, commit receipt whose
+/// reply consumer is gone, roster-driven re-push) is the same
+/// upsert-by-digest ingest; the roster rides the package itself
+/// (local.signer), so the old roster channel is gone entirely.
 fn route_statement(f: OutgoingFrame) {
     use zconned_stdio_types::outgoing_frame::Frame as F;
-    // B6 §2 + 107's pitfall 4: the signers roster rides its own
-    // channel and BOTH paths are WHOLE-THREAD SNAPSHOTs (the get
-    // answer always states the full state, possibly empty; a live
-    // push fires only when non-empty). When the confirmation display
-    // is ruled, consume with REPLACE-the-thread-roster semantics —
-    // NEVER per-digest upsert (upsert leaves dirt). A silent push (or
-    // its absence) = no verified signers for that digest, fact. The
-    // roster carries only digests the transcript already holds.
-    if let F::MsgSignersPush(_) = f.frame.as_ref().unwrap() {
-        return;
-    }
     if let F::PeersPush(p) = f.frame.as_ref().unwrap() {
         set_peers(&mut CORE.write(), &p.peers);
         return;
@@ -489,8 +494,16 @@ fn route_statement(f: OutgoingFrame) {
         }
         return;
     }
-    if let F::MsgAdded(a) = f.frame.as_ref().unwrap()
-        && let Some(entry) = a.entry.as_ref()
+    // B7 §4.1: ONE ingest path — upsert by the entry's digest. No
+    // branching on frame provenance (arrival / own-commit receipt /
+    // roster re-push are the same frame; newness and own-ness are
+    // derivable locally). The roster (local.signer) is the ✍ join's
+    // second input when the confirmed-from display gets ruled — the
+    // verdict stays ours (the core reports facts, never the
+    // conjunction).
+    if let F::MsgPackagePush(p) = f.frame.as_ref().unwrap()
+        && let Some(pkg) = p.package.as_ref()
+        && let Some(entry) = pkg.entry.as_ref()
     {
         let id = entry_ref_id(entry);
         let row = entry_row(entry);
@@ -499,9 +512,11 @@ fn route_statement(f: OutgoingFrame) {
             st.threads.push(ThreadRow { id: id.clone() });
         }
         let rows = st.logs.entry(id).or_default();
-        let dup = rows.last() == Some(&row);
-        if !dup {
-            rows.push(row);
+        // upsert by digest: a re-push (roster change) REPLACES the
+        // row; a first sight appends
+        match rows.iter().position(|r| r.ref_id == row.ref_id) {
+            Some(i) => rows[i] = row,
+            None => rows.push(row),
         }
     }
 }
@@ -807,7 +822,17 @@ async fn request(frame: IncomingFrame, expect: Expect) -> Result<Vec<OutgoingFra
         reply: r_tx,
     })
     .map_err(|_| "core io gone".to_string())?;
-    r_rx.await.map_err(|_| "core io dropped".to_string())?
+    // TEMP io probe (retire list pending): the request left; if the
+    // io task never resolves it we need to see WHICH side died
+    let r = r_rx.await;
+    match r.as_ref() {
+        Err(_) => trace("[io] request DIED: the io task dropped the reply"),
+        Ok(inner) => match inner {
+            Ok(frames) => trace(&format!("[io] request resolved: {} frame(s)", frames.len())),
+            Err(e) => trace(&format!("[io] request resolved Err: {e}")),
+        },
+    }
+    r.map_err(|_| "core io dropped".to_string())?
 }
 
 /// self_get -> the identity card, verbatim (the core returns
@@ -909,7 +934,14 @@ pub async fn thread_log(thread_hex: &str) -> Result<Vec<LogRow>, String> {
     let mut rows = Vec::new();
     for f in frames {
         if let Some(zconned_stdio_types::outgoing_frame::Frame::MsgThreadsLogPush(p)) = f.frame {
-            rows.extend(p.entries.iter().map(entry_row));
+            // B7 E6: the log answer = one package per message; the
+            // roster rides each package (local.signer)
+            rows.extend(
+                p.packages
+                    .iter()
+                    .filter_map(|pkg| pkg.entry.as_ref())
+                    .map(entry_row),
+            );
         }
     }
     Ok(rows)
@@ -985,17 +1017,18 @@ pub async fn commit(thread_hex: Option<&str>, text: &str) -> Result<String, Stri
     )
     .await?;
     // 3. the commit: the core stamps the registry claims (ts) and
-    // answers the pair (msg_added + the resting draft)
+    // answers the B7 pair (msg_package_push with the COMPLETE
+    // roster + the resting draft)
     let frames = request(
         incoming(M::MsgDraftCommit(zconned_stdio_types::MsgDraftCommit {})),
         Expect::Commit,
     )
     .await?;
-    // the pair: entry (the new tip) + the resting draft
+    // the pair: package (the new tip + its roster) + the resting draft
     let mut new_id = None;
     for f in frames {
-        if let Some(zconned_stdio_types::outgoing_frame::Frame::MsgAdded(a)) = f.frame
-            && let Some(entry) = a.entry.as_ref()
+        if let Some(zconned_stdio_types::outgoing_frame::Frame::MsgPackagePush(p)) = f.frame
+            && let Some(entry) = p.package.as_ref().and_then(|pkg| pkg.entry.as_ref())
         {
             let id = entry_ref_id(entry);
             let row = entry_row(entry);

@@ -343,6 +343,7 @@ async fn boot() -> Result<(), JsValue> {
         .landing(Box::new(zconned::session::RecordLanding::new(
             kit.store.clone(),
             peers.clone(),
+            kit.registry.clone(),
             kit.notices_tx.clone(),
         )))
         .outbox(outbox)
@@ -402,7 +403,7 @@ async fn boot() -> Result<(), JsValue> {
                     // frame and leaves the rest of the read buffer
                     // untouched — a pump's frames coalescing into a
                     // single read used to DESTROY every frame after
-                    // the first (the commit pair: msg_added arrived,
+                    // the first (the commit pair: msg_package_push arrived,
                     // its MsgDraftPush twin silently died -> the UI's
                     // reply matcher hung forever). Feed until the
                     // buffer is exhausted.
