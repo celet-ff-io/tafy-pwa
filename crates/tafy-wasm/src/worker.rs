@@ -46,7 +46,7 @@ fn wasm_sleep(ms: i32) -> wasm_bindgen_futures::JsFuture {
 // The visit gate: a relay whose plane streams never flush their
 // response headers (the live-relay finding, reported upstream) holds
 // the visit future forever — the face must fail loudly, not hang.
-const VISIT_TIMEOUT_MS: i32 = 45_000;
+const VISIT_TIMEOUT_MS: i32 = 120_000;
 
 impl Ctrl {
     fn parse(raw: &str) -> Option<Self> {
@@ -447,7 +447,7 @@ async fn boot() -> Result<(), JsValue> {
                             }
                         },
                         _ = wasm_sleep(VISIT_TIMEOUT_MS) => {
-                            conn_face(&ctrl_port, "error", "the visit ran past 45s — the relay's plane stream never answered (reported upstream)");
+                            conn_face(&ctrl_port, "error", &format!("the visit ran past its {}s gate — the relay's plane stream never answered (reported upstream)", VISIT_TIMEOUT_MS / 1000));
                         }
                     }
                 }
