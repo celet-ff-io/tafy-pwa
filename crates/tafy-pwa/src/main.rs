@@ -55,7 +55,7 @@ fn copy_to_clipboard(t: String) {
     });
 }
 
-//// The relay strip's faces, sourced from the REAL visit state (the
+/// The relay strip's faces, sourced from the REAL visit state (the
 /// worker's control-port statements; no probe theater).
 fn conn_face(conn: &core::Conn, relay_unset: bool) -> String {
     match conn {
