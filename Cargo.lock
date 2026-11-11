@@ -3246,10 +3246,12 @@ name = "tafy-carrier"
 version = "0.1.0-alpha.1"
 dependencies = [
  "futures",
+ "js-sys",
  "prost",
  "send_wrapper",
  "tonic",
  "tonic-web-wasm-client",
+ "wasm-bindgen-futures",
  "web-sys",
  "zconned",
  "zconnor-mail-types",

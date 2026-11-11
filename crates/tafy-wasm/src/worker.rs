@@ -44,8 +44,19 @@ fn wasm_sleep(ms: i32) -> wasm_bindgen_futures::JsFuture {
 }
 
 // The visit gate: a relay whose plane streams never flush their
-// response headers (the live-relay finding, reported upstream) holds
-// the visit future forever — the face must fail loudly, not hang.
+// response headers (the live-relay finding) holds the visit future
+// forever — the face must fail loudly, not hang.
+//
+// THE ATTACH FLAKE ABSORB lives INSIDE the carrier now (106's §5
+// verdict, 2026-11-15): the plane-OPEN RPCs race a SHORT timeout
+// and retry promptly (a retry opens a fresh pooled connection —
+// the re-test data: every retry connects; only the OPEN flakes).
+// The visit ceremony itself is NOT retried here and the gate is
+// NOT shortened: the ceremony legitimately runs tens of seconds
+// (tunnel unary latency × the call ladder — measured; a 10s visit
+// gate cut every healthy attempt and just re-ran the whole
+// ceremony, churning tokens). This gate stays the single-attempt
+// backstop it always was.
 const VISIT_TIMEOUT_MS: i32 = 120_000;
 
 impl Ctrl {
@@ -448,11 +459,14 @@ async fn boot() -> Result<(), JsValue> {
                     conn_face(&ctrl_port, "connecting", &relay);
                     transport.repoint(tafy_carrier::GrpcWebCarrier::new(relay));
                     // THE VISIT GATE: the ceremony normally returns in
-                    // seconds; a relay whose plane streams never flush
-                    // (reported upstream) holds visit() forever — the
-                    // dropped future aborts its fetch (the client's
+                    // tens of seconds (the tunnel's unary latency × the
+                    // call ladder); a relay whose plane streams never
+                    // flush (reported upstream) holds visit() forever —
+                    // the dropped future aborts its fetch (the client's
                     // abort guard), the face fails loudly, the queued
-                    // mail stays for the next visit.
+                    // mail stays for the next visit. The attach-open
+                    // flake is absorbed INSIDE the carrier (short open
+                    // timeouts + prompt retries — see the carrier).
                     tokio::select! {
                         r = transport.visit() => match r {
                             Ok(()) => conn_face(&ctrl_port, "connected", ""),

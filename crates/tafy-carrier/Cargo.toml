@@ -31,7 +31,12 @@ send_wrapper = { version = "0.6", features = ["futures"] }
 # console traces; strip with the other TEMP faces.
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-web-sys = { version = "0.3.107", features = ["console"] }
+# The plane-open flake absorb: a setTimeout sleep to race the attach
+# OPEN against (the worker-context DedicatedWorkerGlobalScope timer;
+# the same pattern as the worker's wasm_sleep).
+web-sys = { version = "0.3.107", features = ["console", "DedicatedWorkerGlobalScope"] }
+js-sys = "0.3.107"
+wasm-bindgen-futures = "=0.4.80"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # keep the native check compiling (the crate never runs natively)

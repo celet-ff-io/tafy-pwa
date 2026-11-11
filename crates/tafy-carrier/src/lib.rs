@@ -31,6 +31,63 @@ mod imp {
         endpoint: String,
     }
 
+    // ---- the plane-open flake absorb (106's §5 verdict, 2026-11-15) ----
+    //
+    // The attach OPEN intermittently never answers: the browser↔tunnel
+    // pooled h2 connection is idle-reaped between page operations and
+    // browsers never auto-retry a non-idempotent POST on a dead
+    // connection. The re-test data: attached streams are stable, only
+    // the OPEN flakes, and every RETRY opens a fresh pooled connection
+    // and connects. So each plane-OPEN RPC races a SHORT timeout and
+    // retries PROMPTLY — the hang case resolves inside the visit
+    // instead of surfacing to the user (the visit-level gate stays
+    // the long backstop: the ceremony legitimately runs tens of
+    // seconds through the tunnel).
+    const PLANE_OPEN_TIMEOUT_MS: i32 = 10_000;
+    const PLANE_OPEN_ATTEMPTS: u32 = 3;
+
+    /// The worker-context timer (the same pattern as the worker's
+    /// wasm_sleep): a setTimeout promise as the racing arm.
+    async fn sleep_ms(ms: i32) {
+        use web_sys::wasm_bindgen::JsCast as _;
+        let p = js_sys::Promise::new(&mut |resolve, _| {
+            let scope: web_sys::DedicatedWorkerGlobalScope =
+                js_sys::global().unchecked_into();
+            let _ = scope.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms);
+        });
+        let _ = SendWrapper::new(wasm_bindgen_futures::JsFuture::from(p)).await;
+    }
+
+    /// Race one plane-open future against the short timeout; on a
+    /// timeout drop the future (aborting its fetch — the client's
+    /// abort guard) and retry on a fresh connection. Exhausting the
+    /// attempts surfaces the error (the queued mail stays queued).
+    async fn open_plane_rpc<T, Fut, F>(make: F) -> Result<T>
+    where
+        F: Fn() -> Fut,
+        Fut: std::future::Future<Output = Result<T>>,
+    {
+        for attempt in 1..=PLANE_OPEN_ATTEMPTS {
+            let fut = make();
+            let arm = sleep_ms(PLANE_OPEN_TIMEOUT_MS);
+            match futures::future::select(Box::pin(fut), Box::pin(arm)).await {
+                futures::future::Either::Left((r, _)) => return r,
+                futures::future::Either::Right((_, _fut)) => {
+                    trace(&format!(
+                        "plane open hit the {}s gate (attempt {attempt}/{PLANE_OPEN_ATTEMPTS}) — retrying on a fresh connection",
+                        PLANE_OPEN_TIMEOUT_MS / 1000,
+                    ));
+                }
+            }
+        }
+        Err(Error::Call {
+            message: format!(
+                "the plane open never answered within {}s×{PLANE_OPEN_ATTEMPTS} — the pooled connection is dead and the retries exhausted",
+                PLANE_OPEN_TIMEOUT_MS / 1000,
+            ),
+        })
+    }
+
     impl GrpcWebCarrier {
         pub fn new(endpoint: impl Into<String>) -> Self {
             Self {
@@ -342,7 +399,12 @@ mod imp {
             r
         }
 
-        async fn report_mail_received(&mut self, from_mailbox: Vec<u8>, up_to: u64) -> Result<()> {
+        async fn report_mail_received(
+            &mut self,
+            from_mailbox: Vec<u8>,
+            up_to: u64,
+            key_version: u32,
+        ) -> Result<()> {
             trace("report_mail_received enter");
             let token = self.1.clone();
             let r = (|| async {
@@ -354,6 +416,7 @@ mod imp {
                         relay::ReportMailReceivedRequest {
                             from_mailbox,
                             up_to,
+                            key_version,
                         },
                     ))
                     .await
@@ -387,48 +450,75 @@ mod imp {
             trace("transcript_plane enter");
             let token = self.1.clone();
             let client = self.0.clone();
-            SendWrapper::new(async move {
-                let mut c = client;
-                let stream = c
-                    .transcript_plane(present(&token, relay::TranscriptPlaneRequest {}))
-                    .await
-                    .map_err(st)?
-                    .into_inner();
-                Ok(SendStream(SendWrapper::new(stream)).map(plane_item as _))
+            let r = open_plane_rpc(move || {
+                let token = token.clone();
+                let client = client.clone();
+                SendWrapper::new(async move {
+                    let mut c = client;
+                    let stream = c
+                        .transcript_plane(present(&token, relay::TranscriptPlaneRequest {}))
+                        .await
+                        .map_err(st)?
+                        .into_inner();
+                    Ok(SendStream(SendWrapper::new(stream)).map(plane_item as _))
+                })
             })
-            .await
+            .await;
+            match &r {
+                Ok(_) => trace("transcript_plane exit: ok"),
+                Err(e) => trace(&format!("transcript_plane exit: {e}")),
+            }
+            r
         }
 
         async fn resources_plane(&mut self) -> Result<Self::Planes> {
             trace("resources_plane enter");
             let token = self.1.clone();
             let client = self.0.clone();
-            SendWrapper::new(async move {
-                let mut c = client;
-                let stream = c
-                    .resources_plane(present(&token, relay::ResourcesPlaneRequest {}))
-                    .await
-                    .map_err(st)?
-                    .into_inner();
-                Ok(SendStream(SendWrapper::new(stream)).map(plane_item as _))
+            let r = open_plane_rpc(move || {
+                let token = token.clone();
+                let client = client.clone();
+                SendWrapper::new(async move {
+                    let mut c = client;
+                    let stream = c
+                        .resources_plane(present(&token, relay::ResourcesPlaneRequest {}))
+                        .await
+                        .map_err(st)?
+                        .into_inner();
+                    Ok(SendStream(SendWrapper::new(stream)).map(plane_item as _))
+                })
             })
-            .await
+            .await;
+            match &r {
+                Ok(_) => trace("resources_plane exit: ok"),
+                Err(e) => trace(&format!("resources_plane exit: {e}")),
+            }
+            r
         }
 
         async fn signature_plane(&mut self) -> Result<Self::Planes> {
             trace("signature_plane enter");
             let token = self.1.clone();
             let client = self.0.clone();
-            SendWrapper::new(async move {
-                let mut c = client;
-                let stream = c
-                    .signature_plane(present(&token, relay::SignaturePlaneRequest {}))
-                    .await
-                    .map_err(st)?
-                    .into_inner();
-                Ok(SendStream(SendWrapper::new(stream)).map(plane_item as _))
+            let r = open_plane_rpc(move || {
+                let token = token.clone();
+                let client = client.clone();
+                SendWrapper::new(async move {
+                    let mut c = client;
+                    let stream = c
+                        .signature_plane(present(&token, relay::SignaturePlaneRequest {}))
+                        .await
+                        .map_err(st)?
+                        .into_inner();
+                    Ok(SendStream(SendWrapper::new(stream)).map(plane_item as _))
+                })
             })
-            .await
+            .await;
+            match &r {
+                Ok(_) => trace("signature_plane exit: ok"),
+                Err(e) => trace(&format!("signature_plane exit: {e}")),
+            }
+            r
         }
     }
 }
@@ -506,6 +596,7 @@ mod imp {
             &mut self,
             _from_mailbox: Vec<u8>,
             _up_to: u64,
+            _key_version: u32,
         ) -> Result<()> {
             never()
         }
