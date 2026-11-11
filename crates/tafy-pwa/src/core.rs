@@ -176,6 +176,78 @@ fn parse_ref_id(id: &str) -> Option<zconned_material::MsgRef> {
     })
 }
 
+// RFC3339 UTC ("2026-11-11T08:47:00.123Z") -> epoch millis. The ts
+// claim is the sender-declared compose time; a non-UTC offset or a
+// malformed string = None (the caller falls back to the observation).
+// Days-from-civil: Howard Hinnant's algorithm (valid for the whole
+// representable range, no Y2038-class hazard).
+fn chrono_millis(s: &str) -> Option<u64> {
+    let b = s.as_bytes();
+    if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' || b[16] != b':'
+    {
+        return None;
+    }
+    let num = |r: std::ops::Range<usize>| -> Option<u32> {
+        s.get(r)?.bytes().try_fold(0u32, |a, c| {
+            c.is_ascii_digit().then(|| a * 10 + u32::from(c - b'0'))
+        })
+    };
+    let (y, mo, d) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    let (h, mi, se) = (num(11..13)?, num(14..16)?, num(17..19)?);
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) {
+        return None;
+    }
+    // leap-year-correct day count
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let mdays = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    if d > mdays[(mo - 1) as usize] {
+        return None;
+    }
+    // optional fraction + zone suffix (Z or +hh:mm — only Z accepted)
+    let rest = &s[19..];
+    let mut millis = 0u64;
+    let zone_ok = if let Some(frac) = rest.strip_prefix('.') {
+        let digits: String = frac.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let zone = &frac[digits.len()..];
+        // millis = the first three fraction digits, zero-padded
+        let mut m = 0u64;
+        for (i, c) in digits.bytes().take(3).enumerate() {
+            m += u64::from(c - b'0') * [100, 10, 1][i];
+        }
+        millis = m;
+        zone == "Z"
+    } else {
+        rest == "Z"
+    };
+    if !zone_ok {
+        return None;
+    }
+    let yy = y as i64;
+    let mp = if mo > 2 { mo } else { mo + 12 } as i64;
+    let (yy2, mp2) = if mo > 2 { (yy, mp) } else { (yy - 1, mp) };
+    let era = if yy2 >= 0 { yy2 } else { yy2 - 399 } / 400;
+    let yoe = yy2 - era * 400;
+    let doy = (153 * (mp2 - 3) + 2) / 5 + d as i64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    let secs = days * 86_400 + h as i64 * 3600 + mi as i64 * 60 + se as i64;
+    (secs >= 0)
+        .then(|| (secs as u64) * 1000 + millis)
+}
+
 fn entry_row(entry: &zconned_stdio_types::Entry) -> LogRow {
     // content = the resolved slot's value (kind text/plain day one)
     let text = entry
@@ -184,11 +256,25 @@ fn entry_row(entry: &zconned_stdio_types::Entry) -> LogRow {
         .and_then(|c| c.value.as_ref())
         .map(|v| String::from_utf8_lossy(&v.data).into_owned())
         .unwrap_or_default();
+    // THE SEND TIME (the 106 verdict on the battery report): meta.ts
+    // is the OBSERVER's ingest time by design (RowMeta = the
+    // observer-facts half); the sender's time rides the entry's ts
+    // claim (application/vnd.zconn.ts, stamped at compose) — prefer
+    // the claim when present, else the observation.
     let ts_ms = entry
-        .meta
-        .as_ref()
-        .and_then(|m| m.ts.as_ref())
-        .map(|t| (t.seconds.max(0) as u64) * 1000 + (t.nanos / 1_000_000) as u64)
+        .claims
+        .iter()
+        .find(|c| c.kind == "application/vnd.zconn.ts")
+        .and_then(|c| c.value.as_ref())
+        .map(|v| String::from_utf8_lossy(&v.data).into_owned())
+        .and_then(|s| chrono_millis(&s))
+        .or_else(|| {
+            entry
+                .meta
+                .as_ref()
+                .and_then(|m| m.ts.as_ref())
+                .map(|t| (t.seconds.max(0) as u64) * 1000 + (t.nanos / 1_000_000) as u64)
+        })
         .unwrap_or(0);
     LogRow {
         ref_id: entry_ref_id(entry),
@@ -1125,5 +1211,21 @@ pub fn relay_disconnect() {
         if let Some(port) = CTRL_PORT.get() {
             let _ = port.post_message(&JsValue::from_str(r#"{"t":"disconnect"}"#));
         }
+    }
+}
+
+#[cfg(test)]
+mod ts_claim_tests {
+    use super::chrono_millis;
+    #[test]
+    fn rfc3339_utc_parses() {
+        // cross-checked against an independent epoch calculator
+        assert_eq!(chrono_millis("2026-11-11T08:47:00.123Z"), Some(1_794_386_820_123));
+        assert_eq!(chrono_millis("2026-11-11T08:47:00Z"), Some(1_794_386_820_000));
+        assert_eq!(chrono_millis("2024-02-29T00:00:00Z"), Some(1_709_164_800_000));
+        assert_eq!(chrono_millis("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(chrono_millis("2026-11-11T08:47:00+01:00"), None);
+        assert_eq!(chrono_millis("2026-02-29T00:00:00Z"), None);
+        assert_eq!(chrono_millis("garbage"), None);
     }
 }
