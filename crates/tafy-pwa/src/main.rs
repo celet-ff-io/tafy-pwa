@@ -515,6 +515,13 @@ fn peer_sub(p: &core::PeerRow) -> String {
     if !p.endpoints.is_empty() {
         sub.push_str(&format!("  \u{b7}  {}", p.endpoints.join(", ")));
     }
+    // 107's B6 pitfall 3: the third key must not vanish at the
+    // display face — an old card (no record_sign_pub) means this
+    // peer's record signatures stay unverifiable forever until the
+    // card is re-exchanged; the user must SEE that.
+    if !p.has_record_key {
+        sub.push_str("  \u{b7}  no record key");
+    }
     sub
 }
 

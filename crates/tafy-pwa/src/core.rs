@@ -97,6 +97,10 @@ pub struct PeerRow {
     pub endpoints: Vec<String>,
     /// the canonical single-line base64 (the shareable copy source)
     pub card: String,
+    /// the card carries the record-signing key (B6 field 8)? absent
+    /// = an old card — the peer's record signatures are unverifiable
+    /// until re-exchange (107's pitfall 3: surface it, never hide it)
+    pub has_record_key: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -392,6 +396,7 @@ fn peer_row_of(peer: &zconned_stdio_types::Peer) -> Option<PeerRow> {
         dh_algo: peer.dh_algo.clone(),
         endpoints: peer.endpoints.clone(),
         card,
+        has_record_key: peer.record_sign_pub.is_some(),
     })
 }
 
@@ -441,10 +446,14 @@ fn set_peers(st: &mut CoreState, peers: &[zconned_stdio_types::Peer]) {
 /// peer_set receipt AND the resting set) + batch-3 arrivals later.
 fn route_statement(f: OutgoingFrame) {
     use zconned_stdio_types::outgoing_frame::Frame as F;
-    // B6 §2: the signers roster rides its own channel. The UI shows
-    // no confirmation face yet — a silent push (or its absence) is
-    // the honest no-op; the roster snapshot rides msg_signers_get
-    // when the display feature is ruled.
+    // B6 §2 + 107's pitfall 4: the signers roster rides its own
+    // channel and BOTH paths are WHOLE-THREAD SNAPSHOTs (the get
+    // answer always states the full state, possibly empty; a live
+    // push fires only when non-empty). When the confirmation display
+    // is ruled, consume with REPLACE-the-thread-roster semantics —
+    // NEVER per-digest upsert (upsert leaves dirt). A silent push (or
+    // its absence) = no verified signers for that digest, fact. The
+    // roster carries only digests the transcript already holds.
     if let F::MsgSignersPush(_) = f.frame.as_ref().unwrap() {
         return;
     }
