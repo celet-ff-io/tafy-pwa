@@ -31,6 +31,10 @@ enum Ctrl {
     Connect { relay: String },
     Disconnect,
     Diag,
+    /// The page's worker-death heartbeat (106's ruling on the
+    /// panic=abort posture): the page pings on a cadence, the worker
+    /// answers immediately — two missed answers = a dead worker.
+    Ping,
 }
 
 /// A wasm sleep (tokio's time driver is off on wasm32): a Promise
@@ -79,6 +83,7 @@ impl Ctrl {
             }),
             "disconnect" => Some(Ctrl::Disconnect),
             "diag" => Some(Ctrl::Diag),
+            "ping" => Some(Ctrl::Ping),
             _ => None,
         }
     }
@@ -127,7 +132,9 @@ impl zconned::transport::Spawner for WasmSpawner {
         // js-bound future is !Send; the trait promises Send — the
         // single-threaded SendWrapper pattern (sound under the wasm
         // executor; the crate never runs off wasm).
-        // TEMP (retire list pending): the clock bridge's own traces.
+        // TEMP (retire list pending): the clock bridge's own traces —
+        // the DURATION identifies the caller (the seal tick = 1000ms;
+        // a stall here freezes that pump silently).
         let ms = dur.as_millis().min(i32::MAX as u128) as i32;
         web_sys::console::log_1(&format!("[clock] sleep {}ms", ms).into());
         Box::pin(send_wrapper::SendWrapper::new(async move {
@@ -156,6 +163,10 @@ impl zconned::transport::Spawner for WasmSpawner {
             .counter
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let name = format!("pump #{n}");
+        // TEMP (retire list pending): the spawn order trace — pump #0
+        // is the seal pump (the visit spawns it first), #1-#3 the
+        // downstream plane pumps.
+        web_sys::console::log_1(&format!("[spawner] {name} spawned").into());
         let done_death = done.clone();
         wasm_bindgen_futures::spawn_local(async move {
             let cancel = async {
@@ -172,7 +183,10 @@ impl zconned::transport::Spawner for WasmSpawner {
                     .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
                     .unwrap_or_else(|| "opaque panic payload".into());
                 web_sys::console::error_1(
-                    &format!("PUMP DIED ({name}): {msg} — the transport is degraded; report this trace").into(),
+                    &format!(
+                        "PUMP DIED ({name}): {msg} — the transport is degraded; report this trace"
+                    )
+                    .into(),
                 );
             }
             done_death.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -216,8 +230,7 @@ impl log::Log for WorkerLogger {
 pub fn tafy_worker_main() {
     // The log face (installed once; a second wasm instantiation of
     // the worker scope would hit the guard and keep the first face).
-    let _ = log::set_logger(&LOGGER)
-        .map(|_| log::set_max_level(log::LevelFilter::Info));
+    let _ = log::set_logger(&LOGGER).map(|_| log::set_max_level(log::LevelFilter::Info));
     // TEMP: a posting panic hook (a release-wasm panic = a bare trap;
     // the worker's console is unreachable from the page — surface the
     // message through the scope; production drops it silently)
@@ -312,6 +325,26 @@ async fn boot() -> Result<(), JsValue> {
         }
     };
     step("[worker] onmessage set");
+    // THE WORKER-DEATH HEARTBEAT (106's ruling: panic=abort stays; a
+    // dead pump traps the module and the worker dies silently — the
+    // PAGE must notice and respawn). The broadcast rides the SCOPE
+    // (the worker->page direction — the conn faces and the
+    // breadcrumbs prove it live; the page->worker ping direction
+    // was observed dead and is retired). The cadence = the page's
+    // judgment clock; a module trap stops the broadcast and the
+    // page's two-miss rule fires.
+    {
+        let scope_hb = scope.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            loop {
+                // a dead timer cannot fail the broadcast (the timer
+                // fires or the module is dead — either way the page
+                // learns the truth)
+                wasm_sleep(5000).await.ok();
+                let _ = scope_hb.post_message(&JsValue::from_str("worker:alive"));
+            }
+        });
+    }
     // THE READY SIGNAL: the UI must not transfer the port before this
     // (a message posted into a module worker before its script's
     // evaluation completes can be DROPPED — the ready handshake makes
@@ -333,6 +366,16 @@ async fn boot() -> Result<(), JsValue> {
     // disconnect commands; the conn-state faces ride back).
     let feed_ctrl = ctrl_tx.clone();
     let scope_ctrl = scope.clone();
+    // THE HEARTBEAT'S ANSWER rides HERE — the SYNCHRONOUS JS-callback
+    // layer, NOT the ctrl task's command loop. The ruling's two-miss
+    // cadence assumed a fast responder: the ctrl task AWAITS the
+    // visit inside its Connect arm (tens of seconds through the
+    // tunnel), so a mpsc-routed ping would only be answered after
+    // the visit — the heartbeat would false-detect a dead worker
+    // DURING EVERY VISIT and reload-loop, killing each visit's seal
+    // before it runs (observed live). A ping answered in this
+    // closure is independent of the wasm task states: the module is
+    // alive by the fact of answering at all.
     let ctrl_onmessage = Closure::wrap(Box::new(move |e: web_sys::MessageEvent| {
         let raw = e.data().as_string().unwrap_or_default();
         match Ctrl::parse(&raw) {
@@ -422,10 +465,9 @@ async fn boot() -> Result<(), JsValue> {
         zconned::mail::Outbox::open_with("/tafy/store", storage_dyn)
             .map_err(|e| JsValue::from_str(&format!("outbox open: {e}")))?,
     );
-    let spawner: Arc<dyn zconned::transport::Spawner> =
-        Arc::new(WasmSpawner {
-            counter: std::sync::atomic::AtomicUsize::new(0),
-        });
+    let spawner: Arc<dyn zconned::transport::Spawner> = Arc::new(WasmSpawner {
+        counter: std::sync::atomic::AtomicUsize::new(0),
+    });
     // an unset relay = a never-opened endpoint (visits are explicit;
     // the open would fail only if the UI asked for one)
     let endpoint = if relay.trim().is_empty() {
@@ -436,6 +478,15 @@ async fn boot() -> Result<(), JsValue> {
     let mut transport = zconned::transport::Transport::builder()
         .carrier(tafy_carrier::GrpcWebCarrier::new(endpoint))
         .spawner(spawner.clone())
+        // THE RESEAL SCAN'S CLOCK IS std Instant — A PANIC ON WASM
+        // ("time not implemented on this platform"): the scan runs in
+        // the seal pump's tick arm, so the default (300s > 0 = the
+        // scan on) killed the pump at its FIRST tick. Until 106 moves
+        // the scan's clock behind the host seam (the same treatment
+        // as the tick's), the self-heal stays OFF here: a stuck row
+        // is still re-pushed verbatim on every visit, only the
+        // fresh-chain re-seal heal is lost.
+        .reseal_after_secs(0)
         .keyring(Arc::new(std::sync::Mutex::new(keyring)))
         .landing(Box::new(zconned::session::RecordLanding::new(
             kit.store.clone(),
@@ -536,6 +587,11 @@ async fn boot() -> Result<(), JsValue> {
         while let Some(cmd) = ctrl_rx.recv().await {
             match cmd {
                 Ctrl::Boot { .. } => {}
+                // THE HEARTBEAT'S ANSWER: reply immediately — the
+                // module is alive by the fact of answering at all.
+                Ctrl::Ping => {
+                    let _ = ctrl_port.post_message(&JsValue::from_str(r#"{"t":"pong"}"#));
+                }
                 Ctrl::Diag => {
                     let _ = ctrl_port.post_message(&JsValue::from_str("diag: START"));
                     let text = crate::storage::diag_face().await;

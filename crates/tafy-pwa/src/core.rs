@@ -730,6 +730,12 @@ async fn run_client() -> Result<(), String> {
             if let Some(tx) = ready_tx.borrow_mut().take() {
                 let _ = tx.send(());
             }
+        } else if text.contains("worker:alive") {
+            // THE HEARTBEAT'S ECHO: the worker's 5s broadcast stamps
+            // the clock — the heartbeat task judges liveness off this
+            // (106's ruling: under panic=abort a dead pump traps the
+            // module; two missed answers = a dead worker).
+            HEARTBEAT_PONG.store(js_sys::Date::now() as u64, std::sync::atomic::Ordering::SeqCst);
         } else if !text.is_empty() {
             // the worker's boot breadcrumbs surface on the page console
             web_sys::console::log_1(&format!("[worker] {text}").into());
@@ -913,6 +919,9 @@ async fn run_client() -> Result<(), String> {
     if !relay.trim().is_empty() {
         relay_connect(relay);
     }
+    // the worker-death heartbeat: live from now on (the ports are up,
+    // the boot face answered — a dead module gets surfaced + reloaded)
+    spawn_worker_heartbeat();
     Ok(())
 }
 
@@ -1205,6 +1214,95 @@ static CTRL_PORT: std::sync::OnceLock<web_sys::MessagePort> = std::sync::OnceLoc
 #[cfg(target_arch = "wasm32")]
 fn park_ctrl_port(p: web_sys::MessagePort) {
     let _ = CTRL_PORT.set(p);
+}
+
+/// The heartbeat's pong clock (ms since epoch, stamped by the ctrl
+/// onmessage; the heartbeat task reads it). 0 = never answered.
+#[cfg(target_arch = "wasm32")]
+static HEARTBEAT_PONG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// THE WORKER-DEATH HEARTBEAT (106's ruling on the panic=abort
+/// posture: a dead pump traps the module and the worker dies
+/// silently — the page must notice and act). Cadence 5s; a cycle
+/// posts `{"t":"ping"}` on the control port; a cycle with no fresh
+/// pong is a MISS; two consecutive misses = a dead worker → surface
+/// + respawn. The respawn is a full page RELOAD (the airtight shape:
+/// every static/port rewiring problem dies with the page; the OPFS
+/// store persists) guarded against a death-at-boot loop — a reload
+/// no more often than every 20s, else stay surfaced. The reload
+/// also re-runs the visit (the relay setting persists), so the
+/// client comes back connected.
+#[cfg(target_arch = "wasm32")]
+const HEARTBEAT_PERIOD_MS: i32 = 5_000;
+#[cfg(target_arch = "wasm32")]
+const HEARTBEAT_MAX_MISSES: u32 = 2;
+#[cfg(target_arch = "wasm32")]
+const HEARTBEAT_RELOAD_MIN_GAP_MS: f64 = 20_000.0;
+
+#[cfg(target_arch = "wasm32")]
+async fn page_sleep(ms: i32) {
+    // NO tokio::time on the page (no timer driver — core.rs's
+    // standing note); a window setTimeout promise, awaited.
+    let p = js_sys::Promise::new(&mut |resolve: js_sys::Function, _| {
+        if let Some(w) = web_sys::window() {
+            let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(
+                resolve.unchecked_ref(),
+                ms,
+            );
+        }
+    });
+    let _ = wasm_bindgen_futures::JsFuture::from(p).await;
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_worker_heartbeat() {
+    spawn_local(async move {
+        // the first cycle: arm the clock (a pong before any ping = a
+        // stale stamp from a previous worker — ignore it)
+        HEARTBEAT_PONG.store(0, std::sync::atomic::Ordering::SeqCst);
+        let mut misses: u32 = 0;
+        loop {
+            page_sleep(HEARTBEAT_PERIOD_MS).await;
+            let last = HEARTBEAT_PONG.load(std::sync::atomic::Ordering::SeqCst);
+            let now = js_sys::Date::now() as u64;
+            // watch-only: the worker broadcasts its own 5s pulse on the
+            // scope; two stale cycles = a dead worker
+            let answered = last > 0 && now.saturating_sub(last) <= HEARTBEAT_PERIOD_MS as u64 * 3;
+            if answered {
+                misses = 0;
+                continue;
+            }
+            misses += 1;
+            web_sys::console::error_1(
+                &format!("[heartbeat] the worker missed ping {misses}/{HEARTBEAT_MAX_MISSES}").into(),
+            );
+            if misses < HEARTBEAT_MAX_MISSES {
+                continue;
+            }
+            // DEAD: surface + respawn (the guarded reload).
+            let dead = "the worker died (a panic under panic=abort traps the module) — respawning";
+            web_sys::console::error_1(&format!("[heartbeat] {dead}").into());
+            CORE.write().status = Status::Failed(dead.to_string());
+            let w = web_sys::window().unwrap();
+            let guard_ok = w
+                .local_storage()
+                .ok()
+                .flatten()
+                .and_then(|s| s.get_item("tafy:last-worker-reload").ok().flatten())
+                .and_then(|s| s.parse::<f64>().ok())
+                .map(|last_reload| js_sys::Date::now() - last_reload >= HEARTBEAT_RELOAD_MIN_GAP_MS)
+                .unwrap_or(true);
+            if let Some(s) = w.local_storage().ok().flatten() {
+                let _ = s.set_item("tafy:last-worker-reload", &format!("{}", js_sys::Date::now()));
+            }
+            if guard_ok {
+                let _ = js_sys::eval("location.reload()");
+            }
+            // the guard held: stay surfaced (the Failed face) and keep
+            // watching — a worker that comes back alive resets us
+            misses = 0;
+        }
+    });
 }
 
 /// Drive a relay visit: the worker repoints + runs the library's
