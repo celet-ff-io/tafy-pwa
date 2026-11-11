@@ -404,7 +404,10 @@ fn route_statement(f: OutgoingFrame) {
         let tail = format!(
             ":{}:{}",
             r.algo,
-            r.digest.iter().map(|b| format!("{b:02x}")).collect::<String>()
+            r.digest
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
         );
         let text = String::from_utf8_lossy(&v.data).into_owned();
         let mut st = CORE.write();
@@ -514,7 +517,8 @@ async fn run_client() -> Result<(), String> {
     // carries the framed protocol; the control port carries the
     // boot/connect JSON and the conn-state faces back.
     let channel = web_sys::MessageChannel::new().map_err(|_| "no MessageChannel".to_string())?;
-    let ctrl_channel = web_sys::MessageChannel::new().map_err(|_| "no MessageChannel".to_string())?;
+    let ctrl_channel =
+        web_sys::MessageChannel::new().map_err(|_| "no MessageChannel".to_string())?;
     let port = channel.port1();
     let ctrl_port = ctrl_channel.port1();
     park_ctrl_port(ctrl_port.clone());
@@ -810,7 +814,10 @@ pub fn load_thread(id: String) {
 /// chain (the core generates the genesis parent); Some(id) commits
 /// onto the thread's leaf (day-one linear frontier).
 pub async fn commit(thread_hex: Option<&str>, text: &str) -> Result<String, String> {
-    trace(&format!("[commit] enter: thread={thread_hex:?} len={}", text.len()));
+    trace(&format!(
+        "[commit] enter: thread={thread_hex:?} len={}",
+        text.len()
+    ));
     // 1. the cursor
     let cursor = match thread_hex {
         None => zconned_stdio_types::MsgCursorSet {

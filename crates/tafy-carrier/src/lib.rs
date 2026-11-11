@@ -20,8 +20,8 @@ mod imp {
     use futures::Stream;
     use futures::StreamExt as _;
     use send_wrapper::SendWrapper;
-    use zconnor_mail_types::relay::mailbox_service_client::MailboxServiceClient;
     use zconned::transport::{Carrier, Error, MailSession, Result};
+    use zconnor_mail_types::relay::mailbox_service_client::MailboxServiceClient;
     use zconnor_mail_types::{mail, relay};
 
     /// The connection factory: one gRPC-Web client per endpoint
@@ -66,9 +66,7 @@ mod imp {
     /// mapped to the transport's neutral Error.
     pub type GrpcWebPlanes = futures::stream::Map<
         SendStream<tonic::Streaming<relay::PlaneFrame>>,
-        fn(
-            core::result::Result<relay::PlaneFrame, tonic::Status>,
-        ) -> Result<relay::PlaneFrame>,
+        fn(core::result::Result<relay::PlaneFrame, tonic::Status>) -> Result<relay::PlaneFrame>,
     >;
 
     fn plane_item(
@@ -202,10 +200,7 @@ mod imp {
             let client = self.0.clone();
             SendWrapper::new(async move {
                 let mut c = client;
-                Ok(c.send_transcript_mail(mail)
-                    .await
-                    .map_err(st)?
-                    .into_inner())
+                Ok(c.send_transcript_mail(mail).await.map_err(st)?.into_inner())
             })
             .await
         }
@@ -214,10 +209,7 @@ mod imp {
             let client = self.0.clone();
             SendWrapper::new(async move {
                 let mut c = client;
-                Ok(c.send_resources_mail(mail)
-                    .await
-                    .map_err(st)?
-                    .into_inner())
+                Ok(c.send_resources_mail(mail).await.map_err(st)?.into_inner())
             })
             .await
         }
@@ -315,7 +307,6 @@ mod imp {
             never()
         }
     }
-
 
     impl MailSession for GrpcWebSession {
         type Planes = futures::stream::Empty<Result<relay::PlaneFrame>>;

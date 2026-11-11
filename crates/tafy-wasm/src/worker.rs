@@ -38,10 +38,18 @@ impl Ctrl {
         let v: serde_json::Value = serde_json::from_str(raw).ok()?;
         match v.get("t")?.as_str()? {
             "boot" => Some(Ctrl::Boot {
-                relay: v.get("relay").and_then(|r| r.as_str()).unwrap_or("").to_string(),
+                relay: v
+                    .get("relay")
+                    .and_then(|r| r.as_str())
+                    .unwrap_or("")
+                    .to_string(),
             }),
             "connect" => Some(Ctrl::Connect {
-                relay: v.get("relay").and_then(|r| r.as_str()).unwrap_or("").to_string(),
+                relay: v
+                    .get("relay")
+                    .and_then(|r| r.as_str())
+                    .unwrap_or("")
+                    .to_string(),
             }),
             "disconnect" => Some(Ctrl::Disconnect),
             "diag" => Some(Ctrl::Diag),
@@ -164,11 +172,11 @@ async fn boot() -> Result<(), JsValue> {
     let reply_ctrl = std::cell::RefCell::new(Some(ctrl_port_tx));
     let onmessage = Closure::wrap(Box::new(move |e: web_sys::MessageEvent| {
         // the diag string hook (TEMP): a plain string = a command
-        if let Some(raw) = e.data().as_string() {
-            if raw == "diag:storage" {
-                tafy_worker_storage_diag();
-                return;
-            }
+        if let Some(raw) = e.data().as_string()
+            && raw == "diag:storage"
+        {
+            tafy_worker_storage_diag();
+            return;
         }
         let ports = e.ports();
         for p in ports {
@@ -353,7 +361,7 @@ async fn boot() -> Result<(), JsValue> {
     let mut chunk = [0u8; 4096];
     use tokio::io::AsyncReadExt as _;
     let scope_out = scope.clone();
-    let _outbound = wasm_bindgen_futures::spawn_local(async move {
+    wasm_bindgen_futures::spawn_local(async move {
         loop {
             match core_out_read.read(&mut chunk).await {
                 Ok(0) => {
@@ -409,8 +417,7 @@ async fn boot() -> Result<(), JsValue> {
                 }
                 Ctrl::Connect { relay } => {
                     conn_face(&ctrl_port, "connecting", &relay);
-                    transport
-                        .repoint(tafy_carrier::GrpcWebCarrier::new(relay));
+                    transport.repoint(tafy_carrier::GrpcWebCarrier::new(relay));
                     match transport.visit().await {
                         Ok(()) => conn_face(&ctrl_port, "connected", ""),
                         Err(e) => {
