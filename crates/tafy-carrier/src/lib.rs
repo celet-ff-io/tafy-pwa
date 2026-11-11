@@ -228,57 +228,87 @@ mod imp {
         }
 
         async fn get_bundle(&mut self, mailbox: Vec<u8>) -> Result<relay::Bundle> {
-            let client = self.0.clone();
-            SendWrapper::new(async move {
-                let mut c = client;
-                Ok(c.get_bundle(relay::GetBundleRequest { mailbox })
-                    .await
-                    .map_err(st)?
-                    .into_inner())
-            })
-            .await
+            trace("get_bundle enter");
+            let r = (|| async {
+                let client = self.0.clone();
+                SendWrapper::new(async move {
+                    let mut c = client;
+                    Ok(c.get_bundle(relay::GetBundleRequest { mailbox })
+                        .await
+                        .map_err(st)?
+                        .into_inner())
+                })
+                .await
+            })()
+            .await;
+            trace(&format!("get_bundle exit: {r:?}"));
+            r
         }
 
         async fn send_transcript_mail(&mut self, mail: mail::Mail) -> Result<relay::MailReceipt> {
-            let client = self.0.clone();
-            SendWrapper::new(async move {
-                let mut c = client;
-                Ok(c.send_transcript_mail(mail).await.map_err(st)?.into_inner())
-            })
-            .await
+            trace("send_transcript_mail enter");
+            let r = (|| async {
+                let client = self.0.clone();
+                SendWrapper::new(async move {
+                    let mut c = client;
+                    Ok(c.send_transcript_mail(mail).await.map_err(st)?.into_inner())
+                })
+                .await
+            })()
+            .await;
+            trace(&format!("send_transcript_mail exit: {r:?}"));
+            r
         }
 
         async fn send_resources_mail(&mut self, mail: mail::Mail) -> Result<relay::MailReceipt> {
-            let client = self.0.clone();
-            SendWrapper::new(async move {
-                let mut c = client;
-                Ok(c.send_resources_mail(mail).await.map_err(st)?.into_inner())
-            })
-            .await
+            trace("send_resources_mail enter");
+            let r = (|| async {
+                let client = self.0.clone();
+                SendWrapper::new(async move {
+                    let mut c = client;
+                    Ok(c.send_resources_mail(mail).await.map_err(st)?.into_inner())
+                })
+                .await
+            })()
+            .await;
+            trace(&format!("send_resources_mail exit: {r:?}"));
+            r
         }
 
         async fn send_signature_mail(&mut self, mail: mail::Mail) -> Result<relay::MailReceipt> {
-            let client = self.0.clone();
-            SendWrapper::new(async move {
-                let mut c = client;
-                Ok(c.send_signature_mail(mail).await.map_err(st)?.into_inner())
-            })
-            .await
+            trace("send_signature_mail enter");
+            let r = (|| async {
+                let client = self.0.clone();
+                SendWrapper::new(async move {
+                    let mut c = client;
+                    Ok(c.send_signature_mail(mail).await.map_err(st)?.into_inner())
+                })
+                .await
+            })()
+            .await;
+            trace(&format!("send_signature_mail exit: {r:?}"));
+            r
         }
 
         async fn report_mail_received(&mut self, from_mailbox: Vec<u8>, up_to: u64) -> Result<()> {
-            let client = self.0.clone();
-            SendWrapper::new(async move {
-                let mut c = client;
-                c.report_mail_received(relay::ReportMailReceivedRequest {
-                    from_mailbox,
-                    up_to,
+            trace("report_mail_received enter");
+            let r = (|| async {
+                let client = self.0.clone();
+                SendWrapper::new(async move {
+                    let mut c = client;
+                    c.report_mail_received(relay::ReportMailReceivedRequest {
+                        from_mailbox,
+                        up_to,
+                    })
+                    .await
+                    .map_err(st)?;
+                    Ok(())
                 })
                 .await
-                .map_err(st)?;
-                Ok(())
-            })
-            .await
+            })()
+            .await;
+            trace(&format!("report_mail_received exit: {r:?}"));
+            r
         }
 
         async fn get_mail_cursors(&mut self) -> Result<Vec<relay::MailboxCursor>> {

@@ -117,6 +117,9 @@ pub struct CoreState {
     pub conn: Conn,
     /// the self core's identity anchor (full hex; None = no card yet)
     pub self_anchor: Option<String>,
+    /// the client boot gate (the io task up + the seed done): mount-
+    /// time fetches key off this so they re-fire after a boot race
+    pub booted: bool,
 }
 
 pub static CORE: GlobalSignal<CoreState> = Signal::global(CoreState::default);
@@ -764,6 +767,11 @@ async fn run_client() -> Result<(), String> {
     if CORE.read().status == Status::Booting {
         CORE.write().status = Status::Ready;
     }
+    // the reactive boot gate: mount-time fetches (the thread page's
+    // log ask) subscribe to this flag and re-fire when it flips —
+    // the deep-link mount races the boot otherwise (the 'core not
+    // booted' Err used to swallow the fetch silently)
+    CORE.write().booted = true;
     // the relay visit: auto-connect when the setting exists (107's
     // posture — the connection IS the visit; no visit = queued mail)
     // TEMP diag: the post-reload walk's disk truth (removed after the hunt)
@@ -910,8 +918,22 @@ pub async fn thread_log(thread_hex: &str) -> Result<Vec<LogRow>, String> {
 /// Load a thread's log into the cache (the ThreadPage's mount ask).
 pub fn load_thread(id: String) {
     spawn_local(async move {
-        if let Ok(rows) = thread_log(&id).await {
-            CORE.write().logs.insert(id, rows);
+        match thread_log(&id).await {
+            Ok(rows) => {
+                CORE.write().logs.insert(id, rows);
+            }
+            // TEMP diagnostic (retire list pending): the silent-swallow
+            // shape left the thread page at 'Stream pending load…'
+            // forever with no face — surface the Err verbatim.
+            Err(e) => {
+                // TEMP diagnostic (retire list pending): the silent-swallow
+                // shape left the thread page at 'Stream pending load…'
+                // forever with no face — surface the Err verbatim.
+                #[cfg(target_arch = "wasm32")]
+                web_sys::console::error_1(&format!("[thread_log] {id}: {e}").into());
+                #[cfg(not(target_arch = "wasm32"))]
+                eprintln!("[thread_log] {id}: {e}");
+            }
         }
     });
 }

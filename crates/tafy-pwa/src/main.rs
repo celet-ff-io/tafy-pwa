@@ -798,14 +798,21 @@ fn ThreadPage(id: String) -> Element {
     let nav = use_navigator();
     let is_new = id == "new";
 
-    // mount: load the log once (real threads only)
+    // mount: load the log once (real threads only). The fetch keys
+    // off the boot gate: a deep-link mount races the boot (the ask
+    // used to die with 'core not booted' and pend forever) — the
+    // effect re-fires when `booted` flips true.
     let mut loaded = use_signal(|| false);
     let id_for_load = id.clone();
     use_effect(move || {
-        if !is_new && !loaded() {
-            loaded.set(true);
-            core::load_thread(id_for_load.clone());
+        if is_new || loaded() {
+            return;
         }
+        if !core::CORE.read().booted {
+            return;
+        }
+        loaded.set(true);
+        core::load_thread(id_for_load.clone());
     });
 
     // the composer: text -> the commit chain (single-flight); on a
