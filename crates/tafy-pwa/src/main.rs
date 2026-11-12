@@ -137,10 +137,12 @@ fn strip_sub() -> &'static str {
 
 fn conn_sub(conn: &core::Conn) -> &'static str {
     match conn {
-        // the protocol's persist-then-queue: an unvisited commit
-        // re-enters the seal task at the next visit
-        core::Conn::Connected => "sending through the relay — tap to end the visit",
-        _ => "messages queue on this device until the next visit",
+        // THE SEND GATE face (the principal, 2026-11-12): the strip
+        // reports; the tap-to-disconnect affordance is RETIRED. The
+        // protocol's persist-then-queue still covers a sent commit
+        // that failed mid-visit (it re-enters the seal task).
+        core::Conn::Connected => "sending through the relay",
+        _ => "the send key unlocks once the relay connects",
     }
 }
 
@@ -323,8 +325,19 @@ fn App() -> Element {
 }
 
 /// Hand-rolled civil-from-days formatter (no chrono dep in the shell).
+/// LOCAL TIMEZONE (the principal, 2026-11-12): ts_ms is a correct
+/// epoch; the old civil math assumed UTC and rendered UTC wall time.
+/// On the wasm face the shift = the host's own offset (js Date gives
+/// UTC-minus-local MINUTES); the native face (tests) stays UTC —
+/// no tz source there, documented.
 fn fmt_ts(ms: u64) -> String {
-    let secs = (ms / 1000) as i64;
+    let ms = ms as i64;
+    #[cfg(target_arch = "wasm32")]
+    let ms = {
+        let off_min = js_sys::Date::new_0().get_timezone_offset(); // f64 minutes
+        ms - (off_min as i64) * 60_000 // UTC-local shift -> the local wall clock
+    };
+    let secs = ms.div_euclid(1000);
     let (days, rem) = (secs.div_euclid(86400), secs.rem_euclid(86400));
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
@@ -686,6 +699,61 @@ fn relay_saved() -> String {
     String::new()
 }
 
+// SHOW RECEIVED-MESSAGE TIMES (the principal, 2026-11-12): the
+// meta.ts line under each message becomes OPTIONAL — a Settings
+// toggle. Default ON (the shipped face is preserved; the toggle's
+// purpose is the ability to hide). The stamp rows are the timestamp
+// FEATURE and always render (fmt_ts is now local-tz for both).
+static SHOW_RECV_TS_KEY: &str = "tafy.show_recv_ts";
+
+#[cfg(target_arch = "wasm32")]
+fn show_recv_ts() -> bool {
+    web_sys::window()
+        .and_then(|w| w.local_storage().ok().flatten())
+        .and_then(|s| s.get_item(SHOW_RECV_TS_KEY).ok().flatten())
+        .map(|v| v != "0")
+        .unwrap_or(true)
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn show_recv_ts() -> bool {
+    true
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_show_recv_ts(v: bool) {
+    if let Some(s) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let _ = s.set_item(SHOW_RECV_TS_KEY, if v { "1" } else { "0" });
+    }
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn set_show_recv_ts(_v: bool) {}
+
+// ---- the received-time toggle (the principal, 2026-11-12): the
+// meta.ts line under each message becomes optional. Default ON —
+// the shipped face is preserved; the toggle's purpose is the ability
+// to hide. The draft-signal shape (read faces, write-through LS).
+#[component]
+fn RecvTsRow() -> Element {
+    let mut on_d = use_signal(show_recv_ts);
+    rsx! {
+        div { class: "row row-config",
+            div { class: "row-main",
+                span { class: "row-title", "Show received-message times" }
+                span { class: "row-sub", "The time under each message (sender stamps always show)" }
+            }
+            button {
+                class: "switch-btn",
+                onclick: move |_| {
+                    let next = !on_d();
+                    set_show_recv_ts(next);
+                    on_d.set(next);
+                },
+                if on_d() { "ON" } else { "OFF" }
+            }
+        }
+    }
+}
+
 #[component]
 fn RelayRow() -> Element {
     let mut draft = use_signal(relay_saved);
@@ -797,6 +865,7 @@ fn Settings() -> Element {
                     }
                 }
                 RelayRow {}
+                RecvTsRow {}
                 Link { to: Route::AiPage {}, class: "row",
                     div { class: "row-main",
                         span { class: "row-title", "AI" }
@@ -933,7 +1002,7 @@ fn Help() -> Element {
                     div { class: "row-main",
                         span { class: "row-title", "The relay" }
                         span { class: "row-sub",
-                            "Messages travel through a relay during visits. Set the relay address in Settings and use Test to check it. The pill next to the menu key on Home shows the connection: connected, connecting, trouble, or not connected. Offline, messages queue on this device and go out on the next visit." }
+                            "Messages travel through a relay during visits. Set the relay address in Settings and use Test to check it. The pill next to the menu key on Home shows the connection: connected, connecting, trouble, or not connected. Sending needs a live connection — the send key lights up only while connected, and a message that could not leave keeps trying on the next visit." }
                     }
                 }
                 div { class: "row help",
@@ -1168,6 +1237,14 @@ fn ThreadPage(id: String) -> Element {
             web_sys::console::log_1(&"[composer] submit: rejected (empty or in-flight)".into());
             return;
         }
+        // THE SEND GATE (the principal, 2026-11-12): no relay
+        // connection -> no send, even around a disabled button
+        // (Enter still submits the form).
+        if !matches!(core::CORE.read().conn, core::Conn::Connected) {
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::log_1(&"[composer] submit: rejected (relay not connected)".into());
+            return;
+        }
         sending.set(true);
         #[cfg(target_arch = "wasm32")]
         web_sys::console::log_1(&"[composer] submit: accepted, spawning commit".into());
@@ -1315,13 +1392,12 @@ fn ThreadPage(id: String) -> Element {
             form { class: "composer", onsubmit: submit,
                 div {
                     class: if matches!(core::CORE.read().conn, core::Conn::Connected) { "relay-strip live" } else { "relay-strip" },
-                    // the connected strip = the visit's end face (the
-                    // disconnect verb was dead until this affordance)
-                    onclick: move |_| {
-                        if matches!(core::CORE.read().conn, core::Conn::Connected) {
-                            core::relay_disconnect();
-                        }
-                    },
+                    // DISPLAY-ONLY (the principal, 2026-11-12): the old
+                    // tap-to-disconnect affordance is RETIRED — tapping
+                    // the strip must never kill the visit, and a tap
+                    // must never fake a reconnect either. Connection
+                    // control lives in Settings (save = connect, Test
+                    // = a real visit); the strip only REPORTS state.
                     span { class: strip_class(), "{strip_face()}" }
                     span { class: "relay-sub", "{strip_sub()}" }
                 }
@@ -1332,9 +1408,17 @@ fn ThreadPage(id: String) -> Element {
                         disabled: sending,
                     }
                     button {
-                        class: if draft().trim().is_empty() || sending() { "send" } else { "send ready" },
+                        // THE SEND GATE (the principal, 2026-11-12):
+                        // the key lights only with a draft AND a live
+                        // relay connection — an unconnected session
+                        // cannot send (the honest queueing face is
+                        // traded for the gate by mandate; the draft
+                        // stays in the box until the relay connects).
+                        class: if draft().trim().is_empty() || sending()
+                            || !matches!(core::CORE.read().conn, core::Conn::Connected)
+                        { "send" } else { "send ready" },
                         r#type: "submit",
-                        disabled: sending,
+                        disabled: sending() || !matches!(core::CORE.read().conn, core::Conn::Connected),
                         "↑"
                     }
                 }
@@ -1353,7 +1437,14 @@ fn MsgRow(row: core::LogRow, thread: String) -> Element {
         div { key: "{row.ref_id}", class: "msg",
             div { class: "msg-author", class: if row.author == "Me" { "self" } else { "" }, "{row.author}" }
             div { class: "msg-text", "{row.text}" }
-            div { class: "msg-ts", "{fmt_ts(row.ts_ms)}" }
+            // THE meta.ts LINE IS OPTIONAL (the principal, 2026-11-12):
+            // these rows display the OBSERVER's time (no ts claim on
+            // ordinary messages) — shown while the Settings toggle is
+            // on, hidden when it is off. The stamp rows (the ts
+            // FEATURE) always render, already local-tz via fmt_ts.
+            if show_recv_ts() {
+                div { class: "msg-ts", "{fmt_ts(row.ts_ms)}" }
+            }
             if !row.stamp && !row.text.is_empty() && ai::cfg().enabled {
                 button {
                     class: "tr-btn",
