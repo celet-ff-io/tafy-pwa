@@ -492,3 +492,42 @@ body {
 .row-config {
   flex-wrap: wrap;
 }
+
+/* ---- the AI features (Settings -> AI; translation) ---- */
+
+.ai-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--dim);
+}
+
+.switch-btn {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--fg);
+  font-size: 12px;
+  padding: 6px 12px;
+}
+
+/* the per-row translate button (visible when the master is ON) */
+.msg .tr-btn {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  color: var(--dim);
+  font-size: 12px;
+  padding: 0;
+  margin-top: 2px;
+}
+
+/* the translation block: a dim under-row face (this device only) */
+.msg-tr {
+  color: var(--dim);
+  font-size: 13px;
+  line-height: 1.45;
+  margin-top: 4px;
+  padding-left: 2px;
+  border-left: 2px solid var(--line);
+}

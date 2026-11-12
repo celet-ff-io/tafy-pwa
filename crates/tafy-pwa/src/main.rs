@@ -37,6 +37,8 @@
 
 mod core;
 
+mod ai;
+
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local;
 
@@ -287,6 +289,8 @@ enum Route {
     Settings {},
     #[route("/about")]
     About {},
+    #[route("/ai")]
+    AiPage {},
     #[route("/help")]
     Help {},
     #[route("/menu")]
@@ -793,6 +797,12 @@ fn Settings() -> Element {
                     }
                 }
                 RelayRow {}
+                Link { to: Route::AiPage {}, class: "row",
+                    div { class: "row-main",
+                        span { class: "row-title", "AI" }
+                        span { class: "row-sub", "Endpoint and AI features" }
+                    }
+                }
                 Link { to: Route::About {}, class: "row",
                     div { class: "row-main",
                         span { class: "row-title", "About" }
@@ -935,9 +945,175 @@ fn Help() -> Element {
                 }
                 div { class: "row help",
                     div { class: "row-main",
+                        span { class: "row-title", "Translation" }
+                        span { class: "row-sub",
+                            "With translation enabled in Settings → AI, every message gains a translate button; the translation shows under the message and stays on this device only — it is never sent to your peers. Translating sends the message (with a few preceding messages as context) to the AI endpoint YOU configured, in plaintext — pick an endpoint you trust." }
+                    }
+                }
+                div { class: "row help",
+                    div { class: "row-main",
                         span { class: "row-title", "Installing" }
                         span { class: "row-sub",
                             "tAfY is an installable web app: use your browser's add-to-home-screen to keep it like an app. Your data stays on this device." }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---- P-AI: the AI big item (the principal, 2026-11-12) ----
+// The ENDPOINT config lives at the item level (shared by every
+// future AI feature); Translation is PART 1. The design =
+// design/ai-features/coarse.md; the storage ruling = everything
+// PWA-local (localStorage, the relay-url precedent). The disclosure
+// faces are mandatory (the honesty posture): enabling translation
+// sends message content to the user's chosen endpoint in plaintext.
+#[component]
+fn AiPage() -> Element {
+    // the toggle drafts: the dioxus lesson (the principal's toggle
+    // feedback, 2026-11-12) — a signal written but NEVER READ in the
+    // rsx re-renders nothing (the old write-only 'tick' hack left the
+    // labels and the master's hide gate stale until a remount). The
+    // faces derive from READ signals, kept in sync with localStorage
+    // on every write (the same shape as the field drafts below).
+    let mut enabled_d = use_signal(|| ai::cfg().enabled);
+    let mut auto_d = use_signal(|| ai::cfg().auto);
+    // the endpoint drafts (write-through on every keystroke)
+    let mut url_d = use_signal(|| ai::cfg().url);
+    let mut key_d = use_signal(|| ai::cfg().key);
+    let mut model_d = use_signal(|| ai::cfg().model);
+    let mut lang_d = use_signal(|| ai::cfg().lang);
+    let mut n_d = use_signal(|| ai::cfg().n.to_string());
+    // the endpoint test's live face (the relay-Test shape)
+    let mut testing = use_signal(|| false);
+    let mut test_face = use_signal(String::new);
+    let do_test = move |_| {
+        let cfg = ai::cfg();
+        if !ai::endpoint_ready(&cfg) {
+            test_face
+                .set("endpoint: failed ✗ — set the base URL, the key, and the model first".into());
+            return;
+        }
+        testing.set(true);
+        test_face.set("endpoint: testing…".into());
+        // the component-scoped spawn (the established pattern): the
+        // writes land in this page's signals
+        spawn(async move {
+            let face = match ai::test_endpoint(&cfg).await {
+                Ok(ms) => format!("endpoint: ok ✓ {ms}"),
+                Err(e) => format!("endpoint: failed ✗ {e}"),
+            };
+            testing.set(false);
+            test_face.set(face);
+        });
+    };
+    rsx! {
+        div { class: "page",
+            header { class: "page-head",
+                Link { to: Route::Settings {}, class: "back", "‹" }
+                strong { "AI" }
+            }
+            p { class: "page-hint", "AI features — powered by your own endpoint" }
+            div { class: "list",
+                div { class: "row row-config",
+                    div { class: "row-main",
+                        span { class: "row-title", "Endpoint" }
+                        span { class: "row-sub", "OpenAI-format; shared by every AI feature" }
+                    }
+                }
+                div { class: "paste-box",
+                    input {
+                        class: "paste-area",
+                        placeholder: "Base URL (e.g. https://api.openai.com/v1)",
+                        value: "{url_d}",
+                        oninput: move |e| {
+                            ai::set_url(e.value().trim());
+                            url_d.set(e.value());
+                        },
+                    }
+                    input {
+                        class: "paste-area",
+                        r#type: "password",
+                        placeholder: "API key",
+                        value: "{key_d}",
+                        oninput: move |e| {
+                            ai::set_key(&e.value());
+                            key_d.set(e.value());
+                        },
+                    }
+                    input {
+                        class: "paste-area",
+                        placeholder: "Model (e.g. gpt-4o-mini)",
+                        value: "{model_d}",
+                        oninput: move |e| {
+                            ai::set_model(&e.value());
+                            model_d.set(e.value());
+                        },
+                    }
+                    div { class: "btn-row",
+                        button { class: "copy-btn wide", disabled: testing(), onclick: do_test, "Test" }
+                    }
+                    span { class: "relay-sub", "{test_face}" }
+                    p { class: "ai-hint",
+                        "The endpoint must allow browser CORS. Requests carry YOUR message content in plaintext — choose an endpoint you trust."
+                    }
+                }
+                div { class: "row row-config",
+                    div { class: "row-main",
+                        span { class: "row-title", "Translation" }
+                        span { class: "row-sub", "AI translation of messages, part 1 of the AI features" }
+                    }
+                    button {
+                        class: "switch-btn",
+                        onclick: move |_| {
+                            let next = !enabled_d();
+                            ai::set_enabled(next);
+                            enabled_d.set(next);
+                        },
+                        if enabled_d() { "ON" } else { "OFF" }
+                    }
+                }
+                if enabled_d() {
+                    div { class: "row row-config",
+                        div { class: "row-main",
+                            span { class: "row-title", "Auto-translate" }
+                            span { class: "row-sub", "Translate each arriving message as if pressed" }
+                        }
+                        button {
+                            class: "switch-btn",
+                            onclick: move |_| {
+                                let next = !auto_d();
+                                ai::set_auto(next);
+                                auto_d.set(next);
+                            },
+                            if auto_d() { "ON" } else { "OFF" }
+                        }
+                    }
+                    div { class: "paste-box",
+                        input {
+                            class: "paste-area",
+                            placeholder: "Target language (e.g. Simplified Chinese)",
+                            value: "{lang_d}",
+                            oninput: move |e| {
+                                ai::set_lang(&e.value());
+                                lang_d.set(e.value());
+                            },
+                        }
+                        input {
+                            class: "paste-area",
+                            r#type: "number",
+                            placeholder: "Context n (1-20; the target + the (n-1) preceding messages)",
+                            value: "{n_d}",
+                            oninput: move |e| {
+                                let n = e.value().parse::<usize>().unwrap_or(ai::cfg().n).clamp(1, ai::MAX_N);
+                                ai::set_n(n);
+                                n_d.set(e.value());
+                            },
+                        }
+                        p { class: "ai-hint",
+                            "Translations are this device only — never sent to your peers. Each message's translation is requested with the preceding n-1 messages as context."
+                        }
                     }
                 }
             }
@@ -1044,6 +1220,54 @@ fn ThreadPage(id: String) -> Element {
         });
     };
 
+    // THE AUTO TRANSLATE + CACHE HYDRATION (design/ai-features/
+    // coarse.md §3/§6): the effect watches the log. The FIRST pass =
+    // the baseline (NO backfill — settled semantics); growth = the
+    // arrivals -> enqueue (arrivals only: not own sends, not stamps/
+    // empty rows). Every pass hydrates cached rows so the press is
+    // served from the cache with zero network.
+    let mut ai_seen = use_signal(|| None::<usize>);
+    let id_for_ai = id.clone();
+    use_effect(move || {
+        let c = ai::cfg();
+        let rows = core::CORE.read().logs.get(&id_for_ai).cloned();
+        let Some(rows) = rows else { return };
+        if c.enabled {
+            let mut t = ai::TRS.write();
+            for r in &rows {
+                if r.stamp || r.text.is_empty() || t.contains_key(&r.ref_id) {
+                    continue;
+                }
+                if let Some(text) = ai::cache_get(&r.ref_id, &c.lang) {
+                    t.insert(r.ref_id.clone(), ai::TrState::Ready { text, shown: false });
+                }
+            }
+        }
+        // the baseline write is change-guarded: dioxus 0.7's set
+        // notifies subscribers even on an equal value — an unguarded
+        // set here re-fires THIS effect forever and freezes the page
+        // (caught live in the sim: the freeze started the moment the
+        // first log landed)
+        let prev = ai_seen();
+        let next = Some(rows.len());
+        if ai_seen() != next {
+            ai_seen.set(next);
+        }
+        if !c.enabled || !c.auto {
+            return;
+        }
+        let Some(prev) = prev else { return };
+        if rows.len() <= prev {
+            return;
+        }
+        for r in &rows[prev..] {
+            if r.stamp || r.text.is_empty() || r.author == "Me" {
+                continue;
+            }
+            ai::enqueue(id_for_ai.clone(), r.ref_id.clone());
+        }
+    });
+
     rsx! {
         div { class: "thread",
             header { class: "page-head",
@@ -1073,11 +1297,12 @@ fn ThreadPage(id: String) -> Element {
                             // no bubble; the row IS the timestamp
                             div { key: "{e.ref_id}", class: "msg-stamp", "{fmt_ts(e.ts_ms)}" }
                         } else {
-                            div { key: "{e.ref_id}", class: "msg",
-                                div { class: "msg-author", class: if e.author == "Me" { "self" } else { "" }, "{e.author}" }
-                                div { class: "msg-text", "{e.text}" }
-                                div { class: "msg-ts", "{fmt_ts(e.ts_ms)}" }
-                            }
+                            // THE TRANSLATE AFFORDANCE rides MsgRow
+                            // (the per-row button when the master is
+                            // ON; the block under the row carries the
+                            // translation — shown by a press or AUTO;
+                            // stamps/empty rows never gain it)
+                            MsgRow { row: e.clone(), thread: id.clone() }
                         }
                     }
                 } else {
@@ -1113,6 +1338,31 @@ fn ThreadPage(id: String) -> Element {
                         "↑"
                     }
                 }
+            }
+        }
+    }
+}
+
+// ---- one message row (the translate affordance lives here) ----
+// A component of its own so the TRS reads are tracked per row: a
+// translation arriving re-renders ONLY the affected row's component.
+#[component]
+fn MsgRow(row: core::LogRow, thread: String) -> Element {
+    let tr = ai::TRS.read().get(&row.ref_id).cloned();
+    rsx! {
+        div { key: "{row.ref_id}", class: "msg",
+            div { class: "msg-author", class: if row.author == "Me" { "self" } else { "" }, "{row.author}" }
+            div { class: "msg-text", "{row.text}" }
+            div { class: "msg-ts", "{fmt_ts(row.ts_ms)}" }
+            if !row.stamp && !row.text.is_empty() && ai::cfg().enabled {
+                button {
+                    class: "tr-btn",
+                    onclick: move |_| ai::press(&thread, &row.ref_id),
+                    "{ai::button_label(tr.as_ref())}"
+                }
+            }
+            if let Some(ai::TrState::Ready { text, shown: true }) = tr {
+                div { class: "msg-tr", "{text}" }
             }
         }
     }
