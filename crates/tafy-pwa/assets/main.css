@@ -531,3 +531,39 @@ body {
   padding-left: 2px;
   border-left: 2px solid var(--line);
 }
+
+/* THE REMARK/UNTRUSTED FACES (B7 c2 registry; the principal,
+   2026-11-12): the remark names EVERY identity a message carries
+   (author + signers); a RECEIVED message with an author but no
+   signature from that author = the untrusted face — yellow bg on
+   the message area + the honest line. */
+.msg.untrust {
+  background: #fdf3cf;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.msg-untrust {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #8a6d1a;
+}
+
+.msg-signers {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.msg-stamp.untrust {
+  background: #fdf3cf;
+  border-radius: 8px;
+  padding: 6px;
+}
+
+.msg-stamp.untrust-note {
+  margin: 2px 0 8px;
+  font-size: 11px;
+  color: #8a6d1a;
+  text-align: center;
+}

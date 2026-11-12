@@ -92,6 +92,34 @@ pub struct LogRow {
     /// renders as the standalone dim ts line (no author, no bubble:
     /// the row IS the timestamp)
     pub stamp: bool,
+    /// the author's mailbox anchor (meta.from), full lowercase hex;
+    /// "" = the committing core had no mail identity (the dash face)
+    pub from_hex: String,
+    /// THE VERIFIED SIGNER ROSTER (the package's local.signer): the
+    /// anchors whose record signatures the core verified and landed.
+    /// THE REMARK/UNTRUSTED JOINS READ THIS: the author-display face
+    /// and the untrusted verdict (the principal, 2026-11-12: a remark
+    /// names EVERY identity in a message — the author and every
+    /// signer — and a received message whose author signed nothing
+    /// shows the untrusted face).
+    pub signers: Vec<SignerRow>,
+}
+
+/// One verified signer (display facts only; the name face is looked
+/// up live from the registry so a remark edit re-faces every row).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SignerRow {
+    pub anchor_hex: String,
+}
+
+/// One identity-registry row (B7 c2): an observed anchor + its local
+/// remark. The remark is THIS DEVICE's annotation (the author slot of
+/// outgoing packages carries only the SELF remark); none = unset —
+/// the anchor face shows instead.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IdRow {
+    pub anchor_hex: String,
+    pub remark: Option<String>,
 }
 
 /// One contact (a Peer record's display face; 107's W2, web-adapted).
@@ -129,6 +157,10 @@ pub struct CoreState {
     pub conn: Conn,
     /// the self core's identity anchor (full hex; None = no card yet)
     pub self_anchor: Option<String>,
+    /// the identity registry (B7 c2): observed anchors + the local
+    /// remarks (the wholesale IdentitiesPush view; boot-seeded +
+    /// re-asked by the Me page, re-merged on every set/reset receipt)
+    pub identities: Vec<IdRow>,
     /// the client boot gate (the io task up + the seed done): mount-
     /// time fetches key off this so they re-fire after a boot race
     pub booted: bool,
@@ -263,7 +295,10 @@ fn chrono_millis(s: &str) -> Option<u64> {
     (secs >= 0).then(|| (secs as u64) * 1000 + millis)
 }
 
-fn entry_row(entry: &zconned_stdio_types::Entry) -> LogRow {
+fn entry_row(
+    entry: &zconned_stdio_types::Entry,
+    local: Option<&zconned_stdio_types::Local>,
+) -> LogRow {
     // content = the resolved slot's value (kind text/plain day one)
     let text = entry
         .content
@@ -291,11 +326,17 @@ fn entry_row(entry: &zconned_stdio_types::Entry) -> LogRow {
                 .map(|t| (t.seconds.max(0) as u64) * 1000 + (t.nanos / 1_000_000) as u64)
         })
         .unwrap_or(0);
+    let from_hex = entry
+        .meta
+        .as_ref()
+        .map(|m| m.from.iter().map(|b| format!("{b:02x}")).collect::<String>())
+        .unwrap_or_default();
     LogRow {
         ref_id: entry_ref_id(entry),
         // B6 §4: the author = the store's observation of meta.from,
         // joined against the PeerBook (the self anchor renders Me;
-        // the display name lives in the PeerBook's own face)
+        // the REMARK-PREFERRED face is applied at render —
+        // author_display — so a registry edit re-faces every row).
         author: author_face(
             entry
                 .meta
@@ -309,6 +350,20 @@ fn entry_row(entry: &zconned_stdio_types::Entry) -> LogRow {
             && entry.claims.iter().any(|c| {
                 c.kind == CLAIM_KIND_TS && c.value.as_ref().is_some_and(|v| !v.data.is_empty())
             }),
+        from_hex,
+        // the package's verified signer roster (B7: it rides EVERY
+        // package — the commit receipt carries the complete set incl.
+        // the self-signature)
+        signers: local
+            .map(|l| {
+                l.signer
+                    .iter()
+                    .map(|s| SignerRow {
+                        anchor_hex: s.anchor.iter().map(|b| format!("{b:02x}")).collect(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
     }
 }
 
@@ -333,6 +388,7 @@ enum AnswerKind {
     MsgThreadLogPush,
     SelfPush,
     PeersPush,
+    IdentitiesPush,
 }
 
 fn answer_kind(f: &OutgoingFrame) -> Option<AnswerKind> {
@@ -345,6 +401,7 @@ fn answer_kind(f: &OutgoingFrame) -> Option<AnswerKind> {
         F::MsgThreadLogPush(_) => Some(AnswerKind::MsgThreadLogPush),
         F::SelfPush(_) => Some(AnswerKind::SelfPush),
         F::PeersPush(_) => Some(AnswerKind::PeersPush),
+        F::IdentitiesPush(_) => Some(AnswerKind::IdentitiesPush),
         _ => None,
     }
 }
@@ -570,6 +627,18 @@ fn set_peers(st: &mut CoreState, peers: &[zconned_stdio_types::Peer]) {
     st.peers = peers.iter().filter_map(peer_row_of).collect();
 }
 
+/// The identity registry's wholesale merge (B7 c2): the anchor set +
+/// the remarks, verbatim from the core (it sorts; we keep order).
+fn set_identities(st: &mut CoreState, ids: &[zconned_stdio_types::Identity]) {
+    st.identities = ids
+        .iter()
+        .map(|i| IdRow {
+            anchor_hex: i.anchor.iter().map(|b| format!("{b:02x}")).collect(),
+            remark: i.remark.clone().filter(|r| !r.is_empty()),
+        })
+        .collect();
+}
+
 /// Unsolicited frames: the statement bus. B7: the msg domain speaks
 /// ONE frame — every MsgPackagePush (arrival, commit receipt whose
 /// reply consumer is gone, roster-driven re-push) is the same
@@ -579,6 +648,13 @@ fn route_statement(f: OutgoingFrame) {
     use zconned_stdio_types::outgoing_frame::Frame as F;
     if let F::PeersPush(p) = f.frame.as_ref().unwrap() {
         set_peers(&mut CORE.write(), &p.peers);
+        return;
+    }
+    // the identity registry's wholesale view (B7 c2): the set/reset
+    // receipt can surface here when the reply consumer is gone —
+    // same merge either way
+    if let F::IdentitiesPush(p) = f.frame.as_ref().unwrap() {
+        set_identities(&mut CORE.write(), &p.identities);
         return;
     }
     // a resource landed in the core: fill the matching row slot (the
@@ -625,7 +701,7 @@ fn route_statement(f: OutgoingFrame) {
         && let Some(pkg) = p.package.as_ref()
         && let Some(entry) = pkg.entry.as_ref()
     {
-        let row = entry_row(entry);
+        let row = entry_row(entry, pkg.local.as_ref());
         let prev_ref = entry
             .prev
             .first()
@@ -927,6 +1003,20 @@ async fn run_client() -> Result<(), String> {
             }
         }
     }
+    // the identity registry: boot-seeded so the remark-preferred
+    // faces are ready before the first thread render
+    if let Ok(frames) = request(
+        incoming(M::IdentitiesGet(zconned_stdio_types::IdentitiesGet {})),
+        Expect::One(AnswerKind::IdentitiesPush),
+    )
+    .await
+    {
+        for f in frames {
+            if let Some(zconned_stdio_types::outgoing_frame::Frame::IdentitiesPush(p)) = f.frame {
+                set_identities(&mut CORE.write(), &p.identities);
+            }
+        }
+    }
     trace(&format!("seeded; threads={}", CORE.read().threads.len()));
     if CORE.read().status == Status::Booting {
         CORE.write().status = Status::Ready;
@@ -1094,8 +1184,11 @@ pub async fn thread_log(thread_hex: &str) -> Result<Vec<LogRow>, String> {
             rows.extend(
                 p.packages
                     .iter()
-                    .filter_map(|pkg| pkg.entry.as_ref())
-                    .map(entry_row),
+                    .filter_map(|pkg| {
+                        pkg.entry
+                            .as_ref()
+                            .map(|e| entry_row(e, pkg.local.as_ref()))
+                    }),
             );
         }
     }
@@ -1270,7 +1363,7 @@ async fn commit_one(thread_hex: Option<&str>, text: &str, stamp: bool) -> Result
             && let Some(entry) = p.package.as_ref().and_then(|pkg| pkg.entry.as_ref())
         {
             let id = entry_ref_id(entry);
-            let row = entry_row(entry);
+            let row = entry_row(entry, p.package.as_ref().and_then(|pkg| pkg.local.as_ref()));
             // THE THREAD id: for a FRESH commit the core generates the
             // genesis parent (the cursor's fresh) — the thread is the
             // entry's prev[0], NOT the entry's own ref (the message's
@@ -1298,6 +1391,184 @@ async fn commit_one(thread_hex: Option<&str>, text: &str, stamp: bool) -> Result
         }
     }
     new_id.ok_or_else(|| "commit answered without an entry".to_string())
+}
+
+// ---- the identity-registry face (B7 c2) ----
+// The registry = THIS DEVICE's annotations over observed anchors.
+// The remark names EVERY identity a message carries: the author slot
+// AND every verified signer (the principal, 2026-11-12). The display
+// faces look up the registry LIVE (a set/reset re-faces every row),
+// falling back to the parse-time anchor faces.
+
+/// The F1 short form OF THE ANCHOR itself (the anchor = the
+/// Fingerprint digest, so the short form groups its first 8 bytes —
+/// the same notation Fingerprint::short() prints for a peer).
+pub(crate) fn short_anchor(hex: &str) -> String {
+    let head: Vec<char> = hex.chars().take(16).collect();
+    head.chunks(4)
+        .map(|c| c.iter().collect::<String>())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// One identity's live remark (the registry's own view).
+pub fn identity_remark(anchor_hex: &str) -> Option<String> {
+    CORE.read()
+        .identities
+        .iter()
+        .find(|i| i.anchor_hex == anchor_hex)
+        .and_then(|i| i.remark.clone())
+}
+
+/// The author's display face, remark-preferred (the principal,
+/// 2026-11-12): the self anchor renders "Me"; else the registry
+/// remark; else the parse-time anchor face (peer fp / short anchor /
+/// dash).
+pub fn author_display(row: &LogRow) -> String {
+    author_display_in(&CORE.read(), row)
+}
+
+fn author_display_in(st: &CoreState, row: &LogRow) -> String {
+    if !row.from_hex.is_empty() && st.self_anchor.as_deref() == Some(row.from_hex.as_str()) {
+        return "Me".to_string();
+    }
+    if let Some(r) = st
+        .identities
+        .iter()
+        .find(|i| i.anchor_hex == row.from_hex)
+        .and_then(|i| i.remark.clone())
+    {
+        return r;
+    }
+    row.author.clone()
+}
+
+/// One signer's display face, remark-preferred: self = "Me"; else
+/// the registry remark; else the PeerBook fingerprint; else the
+/// short anchor form.
+pub fn signer_display(anchor_hex: &str) -> String {
+    signer_display_in(&CORE.read(), anchor_hex)
+}
+
+fn signer_display_in(st: &CoreState, anchor_hex: &str) -> String {
+    if st.self_anchor.as_deref() == Some(anchor_hex) {
+        return "Me".to_string();
+    }
+    if let Some(r) = st
+        .identities
+        .iter()
+        .find(|i| i.anchor_hex == anchor_hex)
+        .and_then(|i| i.remark.clone())
+    {
+        return r;
+    }
+    if let Some(p) = st.peers.iter().find(|p| p.anchor_hex == anchor_hex) {
+        return p.fp.clone();
+    }
+    if anchor_hex.len() >= 12 {
+        format!("{}…", &anchor_hex[..12])
+    } else {
+        anchor_hex.to_string()
+    }
+}
+
+/// THE UNTRUSTED VERDICT (the interface's conjunction — the core
+/// reports facts, never the conjunction): a RECEIVED message that
+/// HAS an author but NO verified signature FROM that author renders
+/// the untrusted face (yellow bg + the honest line). Own rows are
+/// exempt (the self-signature lands with the commit, B7 E1).
+pub fn row_untrusted(row: &LogRow) -> bool {
+    row_untrusted_in(&CORE.read(), row)
+}
+
+fn row_untrusted_in(st: &CoreState, row: &LogRow) -> bool {
+    if row.from_hex.is_empty() {
+        return false;
+    }
+    let own = st.self_anchor.as_deref() == Some(row.from_hex.as_str());
+    !own && !row.signers.iter().any(|s| s.anchor_hex == row.from_hex)
+}
+
+/// identities_get -> the wholesale registry view (merged; the Me
+/// page's Authors section re-asks on mount — the roster grows with
+/// observed anchors and the core only pushes on the verbs).
+pub async fn identities() -> Result<Vec<IdRow>, String> {
+    let frames = request(
+        incoming(M::IdentitiesGet(zconned_stdio_types::IdentitiesGet {})),
+        Expect::One(AnswerKind::IdentitiesPush),
+    )
+    .await?;
+    let mut rows = None;
+    for f in frames {
+        if let Some(zconned_stdio_types::outgoing_frame::Frame::IdentitiesPush(p)) = f.frame {
+            let mut st = CORE.write();
+            set_identities(&mut st, &p.identities);
+            rows = Some(st.identities.clone());
+        }
+    }
+    rows.ok_or_else(|| "identities_get answered without a registry".to_string())
+}
+
+/// Fire-and-forget registry refresh (the Me page's mount ask).
+pub fn identities_refresh() {
+    spawn_local(async move {
+        let _ = identities().await;
+    });
+}
+
+fn hex_to_bytes(hex: &str) -> Result<Vec<u8>, String> {
+    if hex.len() % 2 != 0 {
+        return Err("bad anchor hex".to_string());
+    }
+    (0..hex.len() / 2)
+        .map(|i| {
+            u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16)
+                .map_err(|_| "bad anchor hex".to_string())
+        })
+        .collect()
+}
+
+/// identity_remark_set{anchor, remark} (case 17): the remark is
+/// required non-empty (the core errors remark_required; the UI
+/// pre-checks). The receipt = the wholesale registry view.
+pub async fn set_remark(anchor_hex: &str, remark: &str) -> Result<(), String> {
+    let anchor = hex_to_bytes(anchor_hex)?;
+    let frames = request(
+        incoming(M::IdentityRemarkSet(zconned_stdio_types::IdentityRemarkSet {
+            anchor,
+            remark: remark.to_string(),
+        })),
+        Expect::One(AnswerKind::IdentitiesPush),
+    )
+    .await?;
+    // THE RECEIPT IS THE NEW WHOLESALE VIEW — merge it (the display
+    // faces read the live registry signal)
+    for f in frames {
+        if let Some(zconned_stdio_types::outgoing_frame::Frame::IdentitiesPush(p)) = f.frame {
+            set_identities(&mut CORE.write(), &p.identities);
+        }
+    }
+    Ok(())
+}
+
+/// identity_remark_reset{anchor} (case 18): clear one remark — the
+/// anchor face shows instead. Receipt = the wholesale view.
+pub async fn reset_remark(anchor_hex: &str) -> Result<(), String> {
+    let anchor = hex_to_bytes(anchor_hex)?;
+    let frames = request(
+        incoming(M::IdentityRemarkReset(
+            zconned_stdio_types::IdentityRemarkReset { anchor },
+        )),
+        Expect::One(AnswerKind::IdentitiesPush),
+    )
+    .await?;
+    // same merge as set (the wholesale view is the receipt)
+    for f in frames {
+        if let Some(zconned_stdio_types::outgoing_frame::Frame::IdentitiesPush(p)) = f.frame {
+            set_identities(&mut CORE.write(), &p.identities);
+        }
+    }
+    Ok(())
 }
 
 // ---- the thread-delete face (B8) ----
@@ -1496,6 +1767,60 @@ pub fn storage_diag() {
 // three-feedback round, 2026-11-12: the strip is display-only. The
 // worker still speaks the {"t":"disconnect"} control verb; a future
 // disconnect affordance = one post_message away, by ruling only.)
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+    fn row(from: &str, signers: &[&str]) -> LogRow {
+        LogRow {
+            ref_id: "1:1:algo:x".into(),
+            author: "a".into(),
+            text: "hi".into(),
+            ts_ms: 0,
+            stamp: false,
+            from_hex: from.to_string(),
+            signers: signers
+                .iter()
+                .map(|s| SignerRow { anchor_hex: s.to_string() })
+                .collect(),
+        }
+    }
+    #[test]
+    fn untrusted_join_and_remark_faces() {
+        // the PURE-STATE face (no dioxus runtime in tests)
+        let st = CoreState {
+            self_anchor: Some("aa".repeat(32)),
+            identities: vec![IdRow {
+                anchor_hex: "bb".repeat(32),
+                remark: Some("alice".into()),
+            }],
+            ..CoreState::default()
+        };
+        // received + signed by the author -> trusted
+        assert!(!row_untrusted_in(&st, &row(&"bb".repeat(32), &[&"bb".repeat(32)])));
+        // received + author present but unsigned -> UNTRUSTED
+        assert!(row_untrusted_in(&st, &row(&"bb".repeat(32), &[&"cc".repeat(32)])));
+        // received + NO signature at all -> untrusted
+        assert!(row_untrusted_in(&st, &row(&"bb".repeat(32), &[])));
+        // own row exempt (no self-signature needed for the face)
+        assert!(!row_untrusted_in(&st, &row(&"aa".repeat(32), &[])));
+        // absent author (no mail identity) -> exempt
+        assert!(!row_untrusted_in(&st, &row("", &[])));
+        // the author face: the remark wins over the anchor face;
+        // self stays "Me"; the short-anchor fallback groups the F1 form
+        let r = row(&"bb".repeat(32), &[]);
+        assert_eq!(author_display_in(&st, &r), "alice");
+        let mine = row(&"aa".repeat(32), &[]);
+        assert_eq!(author_display_in(&st, &mine), "Me");
+        let stranger = row(&"dd".repeat(32), &[]);
+        // the fallback = the parse-time face (author_face already
+        // rendered the stranger form at parse)
+        assert_eq!(author_display_in(&st, &stranger), "a");
+        // the signer face: remark-preferred, then the short anchor
+        assert_eq!(signer_display_in(&st, &"bb".repeat(32)), "alice");
+        assert_eq!(signer_display_in(&st, &"cc".repeat(32)), format!("{}…", &"c".repeat(12)));
+    }
+}
 
 #[cfg(test)]
 mod ts_claim_tests {

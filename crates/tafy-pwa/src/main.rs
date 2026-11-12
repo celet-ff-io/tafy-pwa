@@ -564,6 +564,145 @@ fn Me() -> Element {
                 },
             }
             Contacts {}
+            Authors {}
+        }
+    }
+}
+
+// ---- the identity-registry face (B7 c2; the principal's rulings,
+// 2026-11-12): the roster of observed anchors + the local remarks.
+// A remark names EVERY identity a message carries — the author slot
+// and every verified signer. The remark is a LOCAL annotation (the
+// core's contract): only the SELF remark rides outgoing packages;
+// the display = what THIS device named them, never what they claim.
+#[component]
+fn Authors() -> Element {
+    let editing = use_signal(|| None::<String>);
+    let draft = use_signal(String::new);
+    let err = use_signal(String::new);
+    // the roster grows with observed anchors and the core only
+    // pushes on the verbs — re-ask on every mount
+    use_effect(move || core::identities_refresh());
+    let ids = core::CORE.read().identities.clone();
+    let self_anchor = core::CORE.read().self_anchor.clone();
+    rsx! {
+        p { class: "page-hint", "People ({ids.len()}):" }
+        div { class: "list",
+            for id in ids.iter() {
+                AuthorsRow {
+                    key: "{id.anchor_hex}",
+                    id: id.clone(),
+                    self_anchor: self_anchor.clone(),
+                    editing,
+                    draft,
+                    err,
+                }
+            }
+            if ids.is_empty() {
+                p { class: "page-hint", "No identities observed yet — they appear as messages arrive" }
+            }
+        }
+    }
+}
+
+#[component]
+fn AuthorsRow(
+    id: core::IdRow,
+    self_anchor: Option<String>,
+    editing: Signal<Option<String>>,
+    mut draft: Signal<String>,
+    mut err: Signal<String>,
+) -> Element {
+    let is_self = self_anchor.as_deref() == Some(id.anchor_hex.as_str());
+    // the name face: the remark when set, else the F1 short form of
+    // the anchor itself
+    let name = id.remark.clone().unwrap_or_else(|| core::short_anchor(&id.anchor_hex));
+    let is_editing = editing.read().as_deref() == Some(id.anchor_hex.as_str());
+    // per-closure captures (a move closure takes its variable): one
+    // hex clone per button
+    let hex_edit = id.anchor_hex.clone();
+    let hex_clear = id.anchor_hex.clone();
+    let rem = id.remark.clone();
+    let has_remark = id.remark.is_some();
+    rsx! {
+        div { class: "row",
+            div { class: "row-main",
+                span { class: "row-title", if is_self { "{name} (this device)" } else { "{name}" } }
+                span { class: "row-sub",
+                    if is_self && id.remark.is_some() {
+                        "the name peers see on your messages"
+                    } else if id.remark.is_some() {
+                        "remark set — tap rename to change, clear to remove"
+                    } else {
+                        "no remark — messages show the fingerprint"
+                    }
+                }
+            }
+            if is_editing {
+                div { class: "paste-box",
+                    input {
+                        r#type: "text",
+                        placeholder: "A name for this identity",
+                        value: "{draft}",
+                        oninput: move |e| draft.set(e.value()),
+                    }
+                    if !err.read().is_empty() {
+                        p { class: "paste-err", "{err}" }
+                    }
+                    button {
+                        class: "copy-btn wide",
+                        disabled: draft.read().trim().is_empty(),
+                        onclick: move |_| {
+                            let hex = id.anchor_hex.clone();
+                            let text = draft.read().trim().to_string();
+                            spawn(async move {
+                                match core::set_remark(&hex, &text).await {
+                                    Ok(()) => {
+                                        editing.set(None);
+                                        draft.set(String::new());
+                                        err.set(String::new());
+                                    }
+                                    Err(e) => err.set(e),
+                                }
+                            });
+                        },
+                        "Save"
+                    }
+                    button {
+                        class: "copy-btn wide",
+                        onclick: move |_| {
+                            editing.set(None);
+                            err.set(String::new());
+                        },
+                        "Cancel"
+                    }
+                }
+            } else {
+                button {
+                    class: "copy-btn",
+                    onclick: move |_| {
+                        draft.set(rem.clone().unwrap_or_default());
+                        err.set(String::new());
+                        editing.set(Some(hex_edit.clone()));
+                    },
+                    "rename"
+                }
+                if has_remark {
+                    button {
+                        class: "copy-btn",
+                        onclick: move |_| {
+                            let hex = hex_clear.clone();
+                            spawn(async move {
+                                match core::reset_remark(&hex).await {
+                                    Ok(()) => err.set(String::new()),
+                                    Err(e) => err.set(e),
+                                }
+                            });
+                        },
+                        "clear"
+                    }
+                }
+            }
         }
     }
 }
@@ -995,7 +1134,7 @@ fn Help() -> Element {
                     div { class: "row-main",
                         span { class: "row-title", "People" }
                         span { class: "row-sub",
-                            "Your identity lives on the Me screen — the fingerprint is for comparing, the card is for sharing. Copy your card with one tap; add a contact by pasting theirs." }
+                            "Your identity lives on the Me screen — the fingerprint is for comparing, the card is for sharing. Copy your card with one tap; add a contact by pasting theirs. The People list on Me names every identity your device has seen: give any of them a remark and messages show that name instead of the fingerprint (only you see your remarks; your own remark is what peers see on your messages). A received message with no signature from its author is marked untrusted." }
                     }
                 }
                 div { class: "row help",
@@ -1371,8 +1510,11 @@ fn ThreadPage(id: String) -> Element {
                             // THE TIMESTAMP MESSAGE (107's timestamp
                             // discipline, web face): the stamp row =
                             // the standalone dim ts line — no author,
-                            // no bubble; the row IS the timestamp
-                            div { key: "{e.ref_id}", class: "msg-stamp", "{fmt_ts(e.ts_ms)}" }
+                            // no bubble; the row IS the timestamp.
+                            // It is still a SIGNED message: the
+                            // untrusted face applies (the principal,
+                            // 2026-11-12).
+                            StampRow { row: e.clone() }
                         } else {
                             // THE TRANSLATE AFFORDANCE rides MsgRow
                             // (the per-row button when the master is
@@ -1427,16 +1569,50 @@ fn ThreadPage(id: String) -> Element {
     }
 }
 
+// ---- the stamp row (its own component: the untrusted join reads
+// the registry signal, tracked per row) ----
+#[component]
+fn StampRow(row: core::LogRow) -> Element {
+    let untrusted = core::row_untrusted(&row);
+    rsx! {
+        div { key: "{row.ref_id}", class: if untrusted { "msg-stamp untrust" } else { "msg-stamp" }, "{fmt_ts(row.ts_ms)}" }
+        if untrusted {
+            div { class: "msg-stamp untrust-note", "this message is currently untrusted — no signature from its author yet" }
+        }
+    }
+}
+
 // ---- one message row (the translate affordance lives here) ----
 // A component of its own so the TRS reads are tracked per row: a
 // translation arriving re-renders ONLY the affected row's component.
 #[component]
 fn MsgRow(row: core::LogRow, thread: String) -> Element {
     let tr = ai::TRS.read().get(&row.ref_id).cloned();
+    // THE REMARK-PREFERRED FACES (the principal, 2026-11-12): the
+    // author AND every signer render by their registry remark when
+    // one exists — the lookup is LIVE (a remark edit re-faces every
+    // row, author_display/signer_display read the registry signal).
+    let author = core::author_display(&row);
+    let signers = row
+        .signers
+        .iter()
+        .map(|s| core::signer_display(&s.anchor_hex))
+        .collect::<Vec<_>>()
+        .join(", ");
+    // THE UNTRUSTED FACE (the interface's conjunction): a RECEIVED
+    // message that has an author but NO verified signature from that
+    // author renders yellow + the honest line.
+    let untrusted = core::row_untrusted(&row);
     rsx! {
-        div { key: "{row.ref_id}", class: "msg",
-            div { class: "msg-author", class: if row.author == "Me" { "self" } else { "" }, "{row.author}" }
+        div { key: "{row.ref_id}", class: if untrusted { "msg untrust" } else { "msg" },
+            div { class: "msg-author", class: if author == "Me" { "self" } else { "" }, "{author}" }
             div { class: "msg-text", "{row.text}" }
+            if !row.signers.is_empty() {
+                div { class: "msg-signers", "✍ {signers}" }
+            }
+            if untrusted {
+                div { class: "msg-untrust", "this message is currently untrusted — no signature from its author yet" }
+            }
             // THE meta.ts LINE IS OPTIONAL (the principal, 2026-11-12):
             // these rows display the OBSERVER's time (no ts claim on
             // ordinary messages) — shown while the Settings toggle is
