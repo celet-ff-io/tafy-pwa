@@ -55,8 +55,9 @@ body {
 }
 
 /* home topbar: multi-function key + brand grouped left (a breath
-   apart — the key reads as an icon of the brand block), me at the
-   right edge */
+   apart — the key reads as an icon of the brand block), the relay
+   conn pill right of the key (principal, 2026-11-12; the slot was
+   EMPTY by IA v3.4), me at the right edge */
 .topbar {
   display: flex;
   align-items: center;
@@ -82,6 +83,30 @@ body {
 .topbar .version {
   font-size: 12px;
   color: var(--dim);
+}
+
+/* the conn pill (principal, 2026-11-12): a compact honest relay-
+   state glyph right of the multi-function key on Home — ✓ connected,
+   … connecting, ✗ error/boot failure, – not connected; the full face
+   rides the title attribute (hover/long-press) */
+.conn-pill {
+  font-size: 13px;
+  color: var(--dim);
+}
+
+.conn-pill.ok {
+  color: #2e8b57;
+}
+
+.conn-pill.bad {
+  color: #c0392b;
+}
+
+/* the relay row's test/save pair (principal, 2026-11-12) */
+.btn-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }
 
 .topbar-actions {

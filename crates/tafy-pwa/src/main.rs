@@ -5,6 +5,9 @@
 // length-variant lists where NOTHING sits below them (same reason a
 // thread is full-screen). Home topbar = the multi-function key and
 // the brand grouped LEFT (a breath apart), Me at the right edge.
+// AMENDED (principal, 2026-11-12): Home's key-side slot — EMPTY by
+// IA v3.4 — now carries the relay conn status (a one-glyph pill;
+// the full honest face rides the title attribute).
 // The multi-function key keeps ONE geometry on every page that has
 // it, with a two-state icon: hamburger on Home, close-X on the MENU
 // page — pressing it again returns Home. The menu is a FULL PAGE
@@ -73,6 +76,33 @@ fn conn_class(conn: &core::Conn) -> &'static str {
         core::Conn::Error(_) => "relay-line bad",
         _ => "relay-line",
     }
+}
+
+/// The topbar's compact conn face (principal, 2026-11-12): a one-
+/// glyph status right of the multi-function key on Home. The glyph
+/// is the summary, never the whole truth — the honest full face
+/// rides the title attribute (and the composer's strip carries the
+/// detail line).
+fn conn_pill(failed: bool, conn: &core::Conn) -> &'static str {
+    if failed {
+        return "✗";
+    }
+    match conn {
+        core::Conn::Connected => "✓",
+        core::Conn::Connecting => "…",
+        core::Conn::Error(_) => "✗",
+        core::Conn::Disconnected => "–",
+    }
+}
+
+fn conn_pill_class(failed: bool, conn: &core::Conn) -> &'static str {
+    if failed || matches!(conn, core::Conn::Error(_)) {
+        return "conn-pill bad";
+    }
+    if matches!(conn, core::Conn::Connected) {
+        return "conn-pill ok";
+    }
+    "conn-pill"
 }
 
 /// The strip's first-line face: a BOOT failure outranks the conn
@@ -365,6 +395,10 @@ fn self_fingerprint(card: &str) -> String {
 fn TopBar(menu: bool) -> Element {
     // compile-time constant from Cargo.toml — the single version source
     let version = env!("CARGO_PKG_VERSION");
+    // the conn pill's sources (read in the body — reactive; the
+    // clone keeps borrowck simple across the two face helpers)
+    let failed = matches!(core::CORE.read().status, core::Status::Failed(_));
+    let conn = core::CORE.read().conn.clone();
     rsx! {
         header { class: "topbar",
             if menu {
@@ -391,6 +425,15 @@ fn TopBar(menu: bool) -> Element {
                 }
             }
             if !menu {
+                // the relay conn status right of the key (principal,
+                // 2026-11-12 — the slot was EMPTY by IA v3.4, amended
+                // by this mandate). Glyph = the summary; the honest
+                // full face rides the title.
+                span {
+                    class: conn_pill_class(failed, &conn),
+                    title: "{strip_face()}",
+                    "{conn_pill(failed, &conn)}",
+                }
                 div { class: "topbar-actions",
                     Link { to: Route::Me {}, class: "icon-btn", title: "Me",
                         svg { fill: "none", stroke: "currentColor", stroke_width: "1.8", stroke_linecap: "round", stroke_linejoin: "round", view_box: "0 0 24 24",
@@ -410,6 +453,9 @@ fn TopBar(menu: bool) -> Element {
 fn Home() -> Element {
     let status = core::CORE.read().status.clone();
     let threads = core::CORE.read().threads.clone();
+    // the for-loop below moves the vec; the trailing-row gate reads
+    // this snapshot instead
+    let has_threads = !threads.is_empty();
     let booting = status == core::Status::Booting;
     let failed = match &status {
         core::Status::Failed(e) => Some(e.clone()),
@@ -439,6 +485,20 @@ fn Home() -> Element {
                             div { class: "row-main",
                                 span { class: "row-title", "{short_ref(&t.id)}" }
                                 span { class: "row-sub", "{thread_preview(&t.id)}" }
+                            }
+                        }
+                    }
+                    // the persistent start row, pinned at the list's
+                    // very bottom (principal, 2026-11-12): a non-empty
+                    // list never loses the new-thread affordance (the
+                    // born-here composer is otherwise unreachable).
+                    // An empty list needs no second row — the empty
+                    // state above IS the start affordance.
+                    if has_threads {
+                        Link { to: Route::ThreadPage { id: "new".to_string() }, class: "row",
+                            div { class: "row-main",
+                                span { class: "row-title", "Start new thread" }
+                                span { class: "row-sub", "Write its first message — it appears here" }
                             }
                         }
                     }
@@ -642,32 +702,65 @@ fn RelayRow() -> Element {
             if !err.read().is_empty() {
                 p { class: "paste-err", "{err}" }
             }
-            button {
-                class: "copy-btn wide",
-                onclick: move |_| {
-                    let url = draft.read().trim().to_string();
-                    // The carrier ruling (principal, alpha.14): the
-                    // relay's browser face is gRPC-WEB over https;
-                    // the deployed relay speaks wss. Both encrypted
-                    // schemes are accepted — plain ws/http is not (a
-                    // https page could not open them anyway).
-                    let ok = url.starts_with("https://")
-                        || url.starts_with("wss://");
-                    if !ok {
-                        err.set(
-                            "the relay address must start with https:// or wss://"
-                                .to_string(),
-                        );
-                        return;
-                    }
-                    save_relay(&url);
-                    draft.set(url.clone());
-                    // saving = connecting: the visit starts right away
-                    // (the strip on the threads reports the outcome)
-                    core::relay_connect(url);
-                },
-                "Save"
+            // the test/save pair (principal, 2026-11-12): Test starts
+            // a REAL visit with the current setting and shows the
+            // outcome in place below — the full ceremony (claim ->
+            // planes) IS the connectivity truth; no probe theater.
+            div { class: "btn-row",
+                button {
+                    class: "copy-btn wide",
+                    onclick: move |_| {
+                        // the draft if edited, else the saved address;
+                        // what gets tested is what gets saved
+                        let url = draft.read().trim().to_string();
+                        let url = if url.is_empty() { relay_saved() } else { url };
+                        err.set(String::new());
+                        let ok = url.starts_with("https://")
+                            || url.starts_with("wss://");
+                        if !ok {
+                            err.set(
+                                "set a https:// or wss:// relay address first"
+                                    .to_string(),
+                            );
+                            return;
+                        }
+                        save_relay(&url);
+                        core::relay_connect(url);
+                    },
+                    "Test"
+                }
+                button {
+                    class: "copy-btn wide",
+                    onclick: move |_| {
+                        let url = draft.read().trim().to_string();
+                        // The carrier ruling (principal, alpha.14): the
+                        // relay's browser face is gRPC-WEB over https;
+                        // the deployed relay speaks wss. Both encrypted
+                        // schemes are accepted — plain ws/http is not (a
+                        // https page could not open them anyway).
+                        let ok = url.starts_with("https://")
+                            || url.starts_with("wss://");
+                        if !ok {
+                            err.set(
+                                "the relay address must start with https:// or wss://"
+                                    .to_string(),
+                            );
+                            return;
+                        }
+                        save_relay(&url);
+                        draft.set(url.clone());
+                        // saving = connecting: the visit starts right away
+                        // (the strip on the threads reports the outcome)
+                        core::relay_connect(url);
+                    },
+                    "Save"
+                }
             }
+            // the live outcome, in place (the REAL visit state — the
+            // same face the composer's strip carries; a boot failure
+            // outranks the conn face)
+            span { class: strip_class(), "{strip_face()}" }
+            span { class: "relay-sub", "{strip_sub()}" }
         }
     }
 }
