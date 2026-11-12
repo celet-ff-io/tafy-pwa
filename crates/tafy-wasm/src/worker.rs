@@ -147,6 +147,28 @@ impl zconned::transport::Spawner for WasmSpawner {
         }))
     }
 
+    fn now_millis(&self) -> u64 {
+        // 106's reseal-clock fix (dev 7ac363a): the scan's first_seen
+        // rides the host clock. Bridge = performance.now() off the
+        // worker's global scope (monotonic — Date.now() would jump on
+        // wall-clock syncs). Zero on any miss = the documented
+        // clockless-host semantics (the scan never fires).
+        let global = js_sys::global();
+        let Ok(perf) = js_sys::Reflect::get(&global, &"performance".into()) else {
+            return 0;
+        };
+        let Ok(now_fn) = js_sys::Reflect::get(&perf, &"now".into()) else {
+            return 0;
+        };
+        let Ok(now_fn) = now_fn.dyn_into::<js_sys::Function>() else {
+            return 0;
+        };
+        let Ok(v) = now_fn.call0(&perf) else {
+            return 0;
+        };
+        v.as_f64().map_or(0, |ms| ms.max(0.0) as u64)
+    }
+
     fn spawn(
         &self,
         pump: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>,
@@ -482,15 +504,10 @@ async fn boot() -> Result<(), JsValue> {
     let mut transport = zconned::transport::Transport::builder()
         .carrier(tafy_carrier::GrpcWebCarrier::new(endpoint))
         .spawner(spawner.clone())
-        // THE RESEAL SCAN'S CLOCK IS std Instant — A PANIC ON WASM
-        // ("time not implemented on this platform"): the scan runs in
-        // the seal pump's tick arm, so the default (300s > 0 = the
-        // scan on) killed the pump at its FIRST tick. Until 106 moves
-        // the scan's clock behind the host seam (the same treatment
-        // as the tick's), the self-heal stays OFF here: a stuck row
-        // is still re-pushed verbatim on every visit, only the
-        // fresh-chain re-seal heal is lost.
-        .reseal_after_secs(0)
+        // The reseal self-heal is back ON (the default 300s): the
+        // scan's clock rides the host seam (106 dev 7ac363a extends
+        // e0bc536 — Spawner::now_millis bridged to performance.now()
+        // above), no std Instant remains in the pump path.
         .keyring(Arc::new(std::sync::Mutex::new(keyring)))
         .landing(Box::new(zconned::session::RecordLanding::new(
             kit.store.clone(),

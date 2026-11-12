@@ -187,16 +187,49 @@ mod imp {
         }
     }
 
-    // TEMP diagnostic (retire list pending): the visit call ladder.
+    // TEMP diagnostic (retire list pending): the visit call ladder,
+    // TIMESTAMPED (106's claim-latency ask, window-receipt verdict §6):
+    // every line carries the ms since the visit's first traced call
+    // (cumulative) and the ms since the previous line (the leg delta).
+    // The decomposed legs = get_version/nonce-fetch → register →
+    // challenge → claim → set_spk/set_opks → each plane OPEN; the
+    // widest leg names the dominant tunnel cost (the relay's claim
+    // RPC itself is single-digit ms — 106's analysis). The clock =
+    // js_sys::Date::now (wall millis; the deltas are seconds-scale —
+    // NTP jumps are noise here, not a monotonicity requirement).
+    static VIS_T0: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static LAST_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    fn wall_ms() -> u64 {
+        js_sys::Date::now().max(0.0) as u64
+    }
+
     fn trace(s: &str) {
-        web_sys::console::log_1(&format!("[carrier] {s}").into());
+        let now = wall_ms();
+        let t0 = VIS_T0.load(std::sync::atomic::Ordering::Relaxed);
+        let last = LAST_MS.swap(now, std::sync::atomic::Ordering::Relaxed);
+        let (cum, leg) = if t0 == 0 || now < t0 || now < last {
+            (0, 0)
+        } else {
+            (now - t0, now - last)
+        };
+        web_sys::console::log_1(&format!("[carrier] +{cum}ms (+{leg}ms) {s}").into());
+    }
+
+    /// The ladder's head resets the visit clock (get_version is the
+    /// ceremony's first call every visit).
+    fn trace_visit_start(s: &str) {
+        let now = wall_ms();
+        VIS_T0.store(now, std::sync::atomic::Ordering::Relaxed);
+        LAST_MS.store(now, std::sync::atomic::Ordering::Relaxed);
+        web_sys::console::log_1(&format!("[carrier] +0ms (+0ms) {s}").into());
     }
 
     impl MailSession for GrpcWebSession {
         type Planes = GrpcWebPlanes;
 
         async fn get_version(&mut self) -> Result<u32> {
-            trace("get_version enter");
+            trace_visit_start("get_version enter");
             let r = (|| async {
                 let client = self.0.clone();
                 SendWrapper::new(async move {
