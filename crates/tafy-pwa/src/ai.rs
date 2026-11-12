@@ -104,11 +104,10 @@ pub fn cfg() -> Cfg {
             }
         },
         n: {
-            let n = ls_get(K_N)
+            ls_get(K_N)
                 .and_then(|v| v.parse::<usize>().ok())
                 .unwrap_or(DEFAULT_N)
-                .clamp(1, MAX_N);
-            n
+                .clamp(1, MAX_N)
         },
     }
 }

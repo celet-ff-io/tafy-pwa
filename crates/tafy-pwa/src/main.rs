@@ -971,9 +971,14 @@ fn Help() -> Element {
 // sends message content to the user's chosen endpoint in plaintext.
 #[component]
 fn AiPage() -> Element {
-    // the write-through tick: every settings write bumps it so the
-    // derived faces (the toggles, the master's hide) re-render
-    let mut tick = use_signal(|| 0u32);
+    // the toggle drafts: the dioxus lesson (the principal's toggle
+    // feedback, 2026-11-12) — a signal written but NEVER READ in the
+    // rsx re-renders nothing (the old write-only 'tick' hack left the
+    // labels and the master's hide gate stale until a remount). The
+    // faces derive from READ signals, kept in sync with localStorage
+    // on every write (the same shape as the field drafts below).
+    let mut enabled_d = use_signal(|| ai::cfg().enabled);
+    let mut auto_d = use_signal(|| ai::cfg().auto);
     // the endpoint drafts (write-through on every keystroke)
     let mut url_d = use_signal(|| ai::cfg().url);
     let mut key_d = use_signal(|| ai::cfg().key);
@@ -1062,13 +1067,14 @@ fn AiPage() -> Element {
                     button {
                         class: "switch-btn",
                         onclick: move |_| {
-                            ai::set_enabled(!ai::cfg().enabled);
-                            tick.set(tick() + 1);
+                            let next = !enabled_d();
+                            ai::set_enabled(next);
+                            enabled_d.set(next);
                         },
-                        if ai::cfg().enabled { "ON" } else { "OFF" }
+                        if enabled_d() { "ON" } else { "OFF" }
                     }
                 }
-                if ai::cfg().enabled {
+                if enabled_d() {
                     div { class: "row row-config",
                         div { class: "row-main",
                             span { class: "row-title", "Auto-translate" }
@@ -1077,10 +1083,11 @@ fn AiPage() -> Element {
                         button {
                             class: "switch-btn",
                             onclick: move |_| {
-                                ai::set_auto(!ai::cfg().auto);
-                                tick.set(tick() + 1);
+                                let next = !auto_d();
+                                ai::set_auto(next);
+                                auto_d.set(next);
                             },
-                            if ai::cfg().auto { "ON" } else { "OFF" }
+                            if auto_d() { "ON" } else { "OFF" }
                         }
                     }
                     div { class: "paste-box",
