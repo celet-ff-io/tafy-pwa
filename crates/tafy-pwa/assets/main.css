@@ -85,10 +85,11 @@ body {
   color: var(--dim);
 }
 
-/* the conn pill (principal, 2026-11-12): a compact honest relay-
-   state glyph right of the multi-function key on Home — ✓ connected,
-   … connecting, ✗ error/boot failure, – not connected; the full face
-   rides the title attribute (hover/long-press) */
+/* the conn pill (principal, 2026-11-12; WORDS 2026-11-12 field
+   feedback): a compact honest relay-state word right of the
+   multi-function key on Home — online / connecting / error /
+   offline; the full face rides the title attribute
+   (hover/long-press) */
 .conn-pill {
   font-size: 13px;
   color: var(--dim);

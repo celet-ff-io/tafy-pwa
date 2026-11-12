@@ -80,20 +80,19 @@ fn conn_class(conn: &core::Conn) -> &'static str {
     }
 }
 
-/// The topbar's compact conn face (principal, 2026-11-12): a one-
-/// glyph status right of the multi-function key on Home. The glyph
-/// is the summary, never the whole truth — the honest full face
-/// rides the title attribute (and the composer's strip carries the
-/// detail line).
+/// The topbar's compact conn face (principal, 2026-11-12): a status
+/// word right of the multi-function key on Home. The word is the
+/// summary, never the whole truth — the honest full face rides the
+/// title attribute (and the composer's strip carries the detail
+/// line). WORDS not glyphs (the principal's field feedback,
+/// 2026-11-12: the one-glyph face was too terse).
 fn conn_pill(failed: bool, conn: &core::Conn) -> &'static str {
-    if failed {
-        return "✗";
-    }
+    let _ = failed;
     match conn {
-        core::Conn::Connected => "✓",
-        core::Conn::Connecting => "…",
-        core::Conn::Error(_) => "✗",
-        core::Conn::Disconnected => "–",
+        core::Conn::Connected => "online",
+        core::Conn::Connecting => "connecting",
+        core::Conn::Error(_) => "error",
+        core::Conn::Disconnected => "offline",
     }
 }
 
@@ -141,7 +140,12 @@ fn conn_sub(conn: &core::Conn) -> &'static str {
         // reports; the tap-to-disconnect affordance is RETIRED. The
         // protocol's persist-then-queue still covers a sent commit
         // that failed mid-visit (it re-enters the seal task).
-        core::Conn::Connected => "sending through the relay",
+        // CONNECTED = NO SUB (the principal's field feedback,
+        // 2026-11-12: 'sending through the relay' was redundant —
+        // the first line already says relay: connected ✓); the
+        // empty string keeps the sub slot's height so the strip
+        // never jumps when the state flips.
+        core::Conn::Connected => "",
         _ => "the send key unlocks once the relay connects",
     }
 }
@@ -449,8 +453,9 @@ fn TopBar(menu: bool) -> Element {
             if !menu {
                 // the relay conn status right of the key (principal,
                 // 2026-11-12 — the slot was EMPTY by IA v3.4, amended
-                // by this mandate). Glyph = the summary; the honest
-                // full face rides the title.
+                // by this mandate; WORDS not glyphs, 2026-11-12 field
+                // feedback). Word = the summary; the honest full face
+                // rides the title.
                 span {
                     class: conn_pill_class(failed, &conn),
                     title: "{strip_face()}",
@@ -1071,6 +1076,8 @@ fn Menu() -> Element {
 
 #[component]
 fn About() -> Element {
+    // compile-time constant from Cargo.toml — the single version source
+    let version = env!("CARGO_PKG_VERSION");
     rsx! {
         div { class: "page",
             header { class: "page-head",
@@ -1078,6 +1085,7 @@ fn About() -> Element {
                 strong { "About" }
             }
             p { class: "page-hint", "tAfY — the zconned web client" }
+            p { class: "page-hint", "v{version}" }
             div { class: "list",
                 // the usage instructions (the principal, 2026-11-12:
                 // the PWA is PUBLIC test software — the help face is
@@ -1098,7 +1106,7 @@ fn About() -> Element {
                     }
                 }
             }
-            p { class: "copyright", "Copyright © 2026-present tAfY Developers" }
+            p { class: "copyright", "Copyright © 2026-present tAfY Developers. All rights reserved." }
         }
     }
 }
