@@ -87,7 +87,8 @@ pub struct LogRow {
 /// One contact (a Peer record's display face; 107's W2, web-adapted).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PeerRow {
-    /// the display fingerprint: sign_pub's first 8 bytes, hex pairs
+    /// the display fingerprint: the SHA3-256 digest's first 8 bytes,
+    /// grouped (F1, via zconned_crypto::Fingerprint::short)
     pub fp: String,
     /// the identity anchor (SHA3-256 of sign_pub, full hex) — the
     /// join key against a row's meta.from (B6 §4)
@@ -483,18 +484,14 @@ fn error_of(f: &OutgoingFrame) -> Option<(String, String)> {
 
 fn peer_row_of(peer: &zconned_stdio_types::Peer) -> Option<PeerRow> {
     use base64::Engine as _;
-    let fp: String = peer
-        .sign_pub
-        .iter()
-        .take(8)
-        .map(|b| format!("{b:02x}"))
-        .collect();
-    let fp = fp
-        .as_bytes()
-        .chunks(4)
-        .map(|c| String::from_utf8_lossy(c).to_string())
-        .collect::<Vec<_>>()
-        .join(" ");
+    // F1 (106's fingerprint-notation ruling, dev 91d0aad): the display
+    // fingerprint = the SHA3-256 DIGEST's first 8 bytes, grouped via
+    // the canon helper Fingerprint::short(). The raw sign_pub prefix
+    // (the old take(8) derivation) is retired — a raw-key prefix and
+    // a digest prefix are never equal, so the two UIs could never be
+    // cross-checked. anchor_hex (the full digest, the machine join
+    // key) stays as-is.
+    let fp = fp_of_peer(peer).unwrap_or_default();
     let card = base64::engine::general_purpose::STANDARD.encode(peer.encode_to_vec());
     Some(PeerRow {
         fp,
@@ -505,6 +502,17 @@ fn peer_row_of(peer: &zconned_stdio_types::Peer) -> Option<PeerRow> {
         card,
         has_record_key: peer.record_sign_pub.is_some(),
     })
+}
+
+/// The F1 short display fingerprint: the digest's first 8 bytes via
+/// the canon helper (the grouping shape is 106's standard verbatim).
+pub(crate) fn fp_of_peer(peer: &zconned_stdio_types::Peer) -> Option<String> {
+    let mut sign = [0u8; 32];
+    if peer.sign_pub.len() != 32 {
+        return None;
+    }
+    sign.copy_from_slice(&peer.sign_pub);
+    Some(zconned_crypto::Fingerprint::of(&sign).short())
 }
 
 /// The identity anchor (SHA3-256 of sign_pub) as full lowercase hex.

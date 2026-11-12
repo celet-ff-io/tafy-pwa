@@ -333,7 +333,9 @@ fn thread_preview(id: &str) -> String {
 }
 
 /// The Me page's fingerprint face: the card = base64(prost Peer);
-/// its sign_pub's first 8 bytes, hex pairs.
+/// the fingerprint = the F1 short notation (the digest's first 8
+/// bytes, grouped — zconned_crypto::Fingerprint::short, the canon
+/// helper; the raw sign_pub prefix derivation is retired).
 /// The self identity's DECODED face: the fingerprint is DISPLAY-ONLY
 /// (107's rule — never a copy source; the card is the copy unit) and
 /// the row states the algorithm pair (also 107's popup face).
@@ -348,19 +350,7 @@ fn self_peer(card: &str) -> Option<zconned_stdio_types::Peer> {
 
 fn self_fingerprint(card: &str) -> String {
     self_peer(card)
-        .map(|peer| {
-            let h: String = peer
-                .sign_pub
-                .iter()
-                .take(8)
-                .map(|b| format!("{b:02x}"))
-                .collect();
-            h.as_bytes()
-                .chunks(4)
-                .map(|c| String::from_utf8_lossy(c).to_string())
-                .collect::<Vec<_>>()
-                .join(" ")
-        })
+        .and_then(|peer| crate::core::fp_of_peer(&peer))
         .unwrap_or_else(|| "···· ···· ···· ····".to_string())
 }
 
