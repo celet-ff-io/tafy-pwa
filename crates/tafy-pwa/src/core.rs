@@ -1491,15 +1491,11 @@ pub fn storage_diag() {
     }
 }
 
-/// End the current visit (the pumps end; queued mail stays).
-pub fn relay_disconnect() {
-    #[cfg(target_arch = "wasm32")]
-    {
-        if let Some(port) = CTRL_PORT.get() {
-            let _ = port.post_message(&JsValue::from_str(r#"{"t":"disconnect"}"#));
-        }
-    }
-}
+// (the disconnect control verb's client face was REMOVED with the
+// tap-to-disconnect affordance it served — the principal's
+// three-feedback round, 2026-11-12: the strip is display-only. The
+// worker still speaks the {"t":"disconnect"} control verb; a future
+// disconnect affordance = one post_message away, by ruling only.)
 
 #[cfg(test)]
 mod ts_claim_tests {
