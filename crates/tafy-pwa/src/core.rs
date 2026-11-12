@@ -735,7 +735,10 @@ async fn run_client() -> Result<(), String> {
             // the clock — the heartbeat task judges liveness off this
             // (106's ruling: under panic=abort a dead pump traps the
             // module; two missed answers = a dead worker).
-            HEARTBEAT_PONG.store(js_sys::Date::now() as u64, std::sync::atomic::Ordering::SeqCst);
+            HEARTBEAT_PONG.store(
+                js_sys::Date::now() as u64,
+                std::sync::atomic::Ordering::SeqCst,
+            );
         } else if !text.is_empty() {
             // the worker's boot breadcrumbs surface on the page console
             web_sys::console::log_1(&format!("[worker] {text}").into());
@@ -1245,10 +1248,8 @@ async fn page_sleep(ms: i32) {
     // standing note); a window setTimeout promise, awaited.
     let p = js_sys::Promise::new(&mut |resolve: js_sys::Function, _| {
         if let Some(w) = web_sys::window() {
-            let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(
-                resolve.unchecked_ref(),
-                ms,
-            );
+            let _ = w
+                .set_timeout_with_callback_and_timeout_and_arguments_0(resolve.unchecked_ref(), ms);
         }
     });
     let _ = wasm_bindgen_futures::JsFuture::from(p).await;
@@ -1274,7 +1275,8 @@ fn spawn_worker_heartbeat() {
             }
             misses += 1;
             web_sys::console::error_1(
-                &format!("[heartbeat] the worker missed ping {misses}/{HEARTBEAT_MAX_MISSES}").into(),
+                &format!("[heartbeat] the worker missed ping {misses}/{HEARTBEAT_MAX_MISSES}")
+                    .into(),
             );
             if misses < HEARTBEAT_MAX_MISSES {
                 continue;
@@ -1293,7 +1295,10 @@ fn spawn_worker_heartbeat() {
                 .map(|last_reload| js_sys::Date::now() - last_reload >= HEARTBEAT_RELOAD_MIN_GAP_MS)
                 .unwrap_or(true);
             if let Some(s) = w.local_storage().ok().flatten() {
-                let _ = s.set_item("tafy:last-worker-reload", &format!("{}", js_sys::Date::now()));
+                let _ = s.set_item(
+                    "tafy:last-worker-reload",
+                    &format!("{}", js_sys::Date::now()),
+                );
             }
             if guard_ok {
                 let _ = js_sys::eval("location.reload()");

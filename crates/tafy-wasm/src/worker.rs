@@ -27,8 +27,12 @@ use wasm_bindgen_futures::JsFuture;
 /// The UI→worker control commands (JSON on the control port).
 #[derive(Debug)]
 enum Ctrl {
-    Boot { relay: String },
-    Connect { relay: String },
+    Boot {
+        relay: String,
+    },
+    Connect {
+        relay: String,
+    },
     Disconnect,
     Diag,
     /// The page's worker-death heartbeat (106's ruling on the
