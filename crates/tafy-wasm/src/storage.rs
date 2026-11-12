@@ -578,6 +578,54 @@ impl zconned::storage::Storage for OpfsStorage {
         Ok(())
     }
 
+    /// B8: remove a directory and everything under it (the thread
+    /// store's delete is the one caller). The mirror drops the files
+    /// and the dirs under the prefix NOW (the session's source of
+    /// truth), then the file deletions PERSIST (Op::Remove each —
+    /// a mirror-only drop would resurrect them on the next boot;
+    /// dirs need no persistence, the mirror rebuilds them).
+    fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
+        let rel = Tree::norm(path, &self.root_path)?;
+        let (victims, dead): (Vec<PathBuf>, Vec<PathBuf>) = {
+            let mut t = self.tree.lock().unwrap();
+            let victims: Vec<PathBuf> = t
+                .files
+                .keys()
+                .filter(|f| f.starts_with(&rel))
+                .cloned()
+                .collect();
+            for f in &victims {
+                t.files.remove(f);
+            }
+            let mut dead: Vec<PathBuf> = t
+                .dirs
+                .iter()
+                .filter(|d| d.starts_with(&rel))
+                .cloned()
+                .collect();
+            for d in &dead {
+                t.dirs.remove(d);
+            }
+            // THE GHOST-ROW TRAP: the boot walk inserts EVERY directory
+            // it encounters — an empty OPFS dir left behind would sit
+            // in t.dirs on the next boot and threads_get would report
+            // the deleted thread as a ghost row. So the dir removals
+            // PERSIST too: Op::Remove handles an (empty) dir exactly
+            // like a file (removeEntry). Deepest-first, AFTER the
+            // files — FIFO makes each dir empty by the time its
+            // Remove drains (a non-empty dir throws on removeEntry).
+            dead.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
+            (victims, dead)
+        };
+        for f in victims {
+            self.enqueue(Op::Remove { rel: f });
+        }
+        for d in dead {
+            self.enqueue(Op::Remove { rel: d });
+        }
+        Ok(())
+    }
+
     fn write_private(&self, path: &Path, data: &[u8]) -> io::Result<()> {
         // wasm expresses no permissions: the trait's own comment
         // makes this the plain-write case on this platform.

@@ -947,11 +947,42 @@ fn ThreadPage(id: String) -> Element {
         });
     };
 
+    // THE DELETE AFFORDANCE (B8): two taps — arm, then confirm (a
+    // destructive op deserves a beat). Local curation only: the
+    // honest title carries the resurrection caveat (an arriving
+    // message re-grows the thread — expected UX, not a bug).
+    let mut armed = use_signal(|| false);
+    let id_for_delete = id.clone();
+    let do_delete = move |_| {
+        if !armed() {
+            armed.set(true);
+            return;
+        }
+        armed.set(false);
+        let id = id_for_delete.clone();
+        spawn(async move {
+            match core::delete_thread(&id).await {
+                Ok(()) => {
+                    nav.replace(Route::Home {});
+                }
+                Err(e) => core::CORE.write().error = Some(e),
+            }
+        });
+    };
+
     rsx! {
         div { class: "thread",
             header { class: "page-head",
                 Link { to: Route::Home {}, class: "back", "‹" }
                 strong { if is_new { "New thread" } else { "{short_ref(&id)}" } }
+                if !is_new {
+                    button {
+                        class: if armed() { "del armed" } else { "del" },
+                        title: "Delete this thread — removes THIS device's copy; an arriving message re-grows it",
+                        onclick: do_delete,
+                        if armed() { "sure?" } else { "Delete" }
+                    }
+                }
             }
             div { class: "thread-stream",
                 if is_new {

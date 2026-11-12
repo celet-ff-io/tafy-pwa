@@ -330,7 +330,7 @@ enum AnswerKind {
     MsgCursorPush,
     MsgDraftPush,
     MsgThreadsPush,
-    MsgThreadsLogPush,
+    MsgThreadLogPush,
     SelfPush,
     PeersPush,
 }
@@ -342,7 +342,7 @@ fn answer_kind(f: &OutgoingFrame) -> Option<AnswerKind> {
         F::MsgCursorPush(_) => Some(AnswerKind::MsgCursorPush),
         F::MsgDraftPush(_) => Some(AnswerKind::MsgDraftPush),
         F::MsgThreadsPush(_) => Some(AnswerKind::MsgThreadsPush),
-        F::MsgThreadsLogPush(_) => Some(AnswerKind::MsgThreadsLogPush),
+        F::MsgThreadLogPush(_) => Some(AnswerKind::MsgThreadLogPush),
         F::SelfPush(_) => Some(AnswerKind::SelfPush),
         F::PeersPush(_) => Some(AnswerKind::PeersPush),
         _ => None,
@@ -1073,19 +1073,22 @@ pub async fn threads() -> Result<Vec<ThreadRow>, String> {
     Ok(rows)
 }
 
-/// msg_threads_log_get{thread} -> the log (merged into the cache).
+/// msg_thread_log_get{thread} -> the log (merged into the cache).
+/// B8 RENAMED SINGULAR (106 dev `cb271cf`, B28: the verb inventory
+/// IS the cardinality documentation): the one-thread log verbs claim
+/// a singular object now; the threads LIST verbs stay plural.
 pub async fn thread_log(thread_hex: &str) -> Result<Vec<LogRow>, String> {
     let thread = parse_ref_id(thread_hex).ok_or_else(|| format!("bad thread ref {thread_hex}"))?;
     let frames = request(
-        incoming(M::MsgThreadsLogGet(zconned_stdio_types::MsgThreadsLogGet {
+        incoming(M::MsgThreadLogGet(zconned_stdio_types::MsgThreadLogGet {
             thread: Some(thread),
         })),
-        Expect::One(AnswerKind::MsgThreadsLogPush),
+        Expect::One(AnswerKind::MsgThreadLogPush),
     )
     .await?;
     let mut rows = Vec::new();
     for f in frames {
-        if let Some(zconned_stdio_types::outgoing_frame::Frame::MsgThreadsLogPush(p)) = f.frame {
+        if let Some(zconned_stdio_types::outgoing_frame::Frame::MsgThreadLogPush(p)) = f.frame {
             // B7 E6: the log answer = one package per message; the
             // roster rides each package (local.signer)
             rows.extend(
@@ -1295,6 +1298,49 @@ async fn commit_one(thread_hex: Option<&str>, text: &str, stamp: bool) -> Result
         }
     }
     new_id.ok_or_else(|| "commit answered without an entry".to_string())
+}
+
+// ---- the thread-delete face (B8) ----
+
+/// msg_thread_delete{thread} (case 19) -> the receipt = msgThreadsPush
+/// (the wholesale SURVIVING threads list — the dual-role precedent;
+/// re-render from it, no per-package cleanup echoes). Semantics (B8,
+/// principal-confirmed): LOCAL store curation — one node removes its
+/// own copy of one thread; counterparts untouched; the unreferenced
+/// sweep rides the delete (resources/signatures no surviving record
+/// references go with it); identity storage untouched; mails already
+/// sent keep draining. RESURRECTION: an arriving mail for the deleted
+/// thread re-grows it, and a commit onto the deleted anchor resolves
+/// to the SAME id — expected UX, not a bug (mute/block = a separate
+/// future feature). Unknown/absent id = an idempotent no-op (the
+/// same receipt, no error).
+pub async fn delete_thread(thread_hex: &str) -> Result<(), String> {
+    let thread = parse_ref_id(thread_hex).ok_or_else(|| format!("bad thread ref {thread_hex}"))?;
+    let frames = request(
+        incoming(M::MsgThreadDelete(zconned_stdio_types::MsgThreadDelete {
+            thread: Some(thread),
+        })),
+        Expect::One(AnswerKind::MsgThreadsPush),
+    )
+    .await?;
+    let mut surviving = None;
+    for f in frames {
+        if let Some(zconned_stdio_types::outgoing_frame::Frame::MsgThreadsPush(p)) = f.frame {
+            surviving = Some(
+                p.threads
+                    .iter()
+                    .map(thread_ref_id)
+                    .filter(|s| !s.is_empty())
+                    .map(|id| ThreadRow { id })
+                    .collect::<Vec<ThreadRow>>(),
+            );
+        }
+    }
+    let rows = surviving.ok_or_else(|| "delete answered without a threads receipt".to_string())?;
+    let mut st = CORE.write();
+    st.threads = rows;
+    st.logs.remove(thread_hex);
+    Ok(())
 }
 
 // ---- the relay control face (batch 3) ----

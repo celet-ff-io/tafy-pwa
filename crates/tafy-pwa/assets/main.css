@@ -361,6 +361,22 @@ body {
   color: var(--dim);
 }
 
+/* the thread-delete affordance (B8): two taps — arm, then confirm
+   (red); the title carries the honest resurrection caveat */
+.page-head .del {
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: var(--dim);
+  font-size: 14px;
+  padding: 6px 2px;
+  cursor: pointer;
+}
+.page-head .del.armed {
+  color: #c0392b;
+  font-weight: 600;
+}
+
 /* THE TIMESTAMP MESSAGE (107's timestamp discipline, web face):
    the stamp row renders as the standalone dim ts line — no author,
    no bubble; the row IS the timestamp (a chat's time separator). */

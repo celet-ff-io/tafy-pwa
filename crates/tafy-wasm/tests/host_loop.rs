@@ -19,8 +19,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use prost::Message as _;
-use zconned_material::CLAIM_KIND_TS;
 use zconned::storage::Storage;
+use zconned_material::CLAIM_KIND_TS;
 use zconned_stdio_types::{IncomingFrame, OutgoingFrame, PROTOCOL_VERSION};
 
 // ---- the RAM storage (the trait's semantics, native test double) ----
@@ -125,6 +125,32 @@ impl Storage for Ram {
         files.insert(Self::norm(to), v);
         Ok(())
     }
+    fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
+        // B8: the thread store's delete is the one caller. Drop the
+        // files and the dirs under the prefix; an absent dir = a
+        // no-op (idempotent, matching the verb's receipt semantics).
+        let prefix = Ram::norm(path);
+        let victims: Vec<PathBuf> = self
+            .files
+            .lock()
+            .unwrap()
+            .keys()
+            .filter(|f| f.starts_with(&prefix))
+            .cloned()
+            .collect();
+        {
+            let mut files = self.files.lock().unwrap();
+            for f in &victims {
+                files.remove(f);
+            }
+        }
+        self.dirs
+            .lock()
+            .unwrap()
+            .retain(|d| !d.starts_with(&prefix));
+        Ok(())
+    }
+
     fn write_private(&self, path: &Path, data: &[u8]) -> io::Result<()> {
         // day one: the plain write (the platform expresses no perms)
         self.write(path, data)
@@ -252,7 +278,7 @@ fn frame_tag(f: &OutgoingFrame) -> &'static str {
         Some(F::MsgCursorPush(_)) => "msg_cursor_push",
         Some(F::MsgDraftPush(_)) => "msg_draft_push",
         Some(F::MsgThreadsPush(_)) => "msg_threads_push",
-        Some(F::MsgThreadsLogPush(_)) => "msg_threads_log_push",
+        Some(F::MsgThreadLogPush(_)) => "msg_thread_log_push",
         Some(F::Error(_)) => "error",
         Some(F::SelfPush(_)) => "self_push",
         _ => "other",
@@ -391,6 +417,45 @@ async fn host_loop_handshake_identity_threads_commit() {
             assert!(
                 dirs.contains(&"threads".to_string()),
                 "the store holds a threads dir after the commit: {dirs:?}"
+            );
+
+            // -- B8: the thread deletes locally; the receipt = the
+            // wholesale surviving list (empty here) --
+            let thread_ref = match f1.frame.as_ref() {
+                Some(zconned_stdio_types::outgoing_frame::Frame::MsgPackagePush(p)) => p
+                    .package
+                    .as_ref()
+                    .and_then(|pkg| pkg.entry.as_ref())
+                    .and_then(|e| e.prev.first().cloned()),
+                _ => None,
+            }
+            .expect("the thread ref (the entry's prev[0])");
+            link.send(&IncomingFrame {
+                method: Some(
+                    zconned_stdio_types::incoming_frame::Method::MsgThreadDelete(
+                        zconned_stdio_types::MsgThreadDelete {
+                            thread: Some(thread_ref),
+                        },
+                    ),
+                ),
+            });
+            let f = link.recv().await;
+            assert_eq!(frame_tag(&f), "msg_threads_push", "delete wrong: {f:?}");
+            match f.frame {
+                Some(zconned_stdio_types::outgoing_frame::Frame::MsgThreadsPush(p)) => {
+                    assert!(
+                        p.threads.is_empty(),
+                        "the deleted thread leaves the list: {:?}",
+                        p.threads
+                    );
+                }
+                other => panic!("expected msg_threads_push: {other:?}"),
+            }
+            // the store side: the thread dir is gone
+            let dirs = ram.read_dir_dirs(Path::new("/tafy/store/threads")).unwrap();
+            assert!(
+                !dirs.iter().any(|d| d.contains("f050")) || dirs.is_empty(),
+                "the thread's store dir should be swept: {dirs:?}"
             );
         })
         .await;
