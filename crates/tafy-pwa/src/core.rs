@@ -1412,15 +1412,6 @@ pub(crate) fn short_anchor(hex: &str) -> String {
         .join(" ")
 }
 
-/// One identity's live remark (the registry's own view).
-pub fn identity_remark(anchor_hex: &str) -> Option<String> {
-    CORE.read()
-        .identities
-        .iter()
-        .find(|i| i.anchor_hex == anchor_hex)
-        .and_then(|i| i.remark.clone())
-}
-
 /// The author's display face, remark-preferred (the principal,
 /// 2026-11-12): the self anchor renders "Me"; else the registry
 /// remark; else the parse-time anchor face (peer fp / short anchor /
