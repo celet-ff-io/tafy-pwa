@@ -329,7 +329,12 @@ fn entry_row(
     let from_hex = entry
         .meta
         .as_ref()
-        .map(|m| m.from.iter().map(|b| format!("{b:02x}")).collect::<String>())
+        .map(|m| {
+            m.from
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+        })
         .unwrap_or_default();
     LogRow {
         ref_id: entry_ref_id(entry),
@@ -1184,11 +1189,7 @@ pub async fn thread_log(thread_hex: &str) -> Result<Vec<LogRow>, String> {
             rows.extend(
                 p.packages
                     .iter()
-                    .filter_map(|pkg| {
-                        pkg.entry
-                            .as_ref()
-                            .map(|e| entry_row(e, pkg.local.as_ref()))
-                    }),
+                    .filter_map(|pkg| pkg.entry.as_ref().map(|e| entry_row(e, pkg.local.as_ref()))),
             );
         }
     }
@@ -1517,13 +1518,12 @@ pub fn identities_refresh() {
 }
 
 fn hex_to_bytes(hex: &str) -> Result<Vec<u8>, String> {
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         return Err("bad anchor hex".to_string());
     }
     (0..hex.len() / 2)
         .map(|i| {
-            u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16)
-                .map_err(|_| "bad anchor hex".to_string())
+            u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).map_err(|_| "bad anchor hex".to_string())
         })
         .collect()
 }
@@ -1534,10 +1534,12 @@ fn hex_to_bytes(hex: &str) -> Result<Vec<u8>, String> {
 pub async fn set_remark(anchor_hex: &str, remark: &str) -> Result<(), String> {
     let anchor = hex_to_bytes(anchor_hex)?;
     let frames = request(
-        incoming(M::IdentityRemarkSet(zconned_stdio_types::IdentityRemarkSet {
-            anchor,
-            remark: remark.to_string(),
-        })),
+        incoming(M::IdentityRemarkSet(
+            zconned_stdio_types::IdentityRemarkSet {
+                anchor,
+                remark: remark.to_string(),
+            },
+        )),
         Expect::One(AnswerKind::IdentitiesPush),
     )
     .await?;
@@ -1781,7 +1783,9 @@ mod registry_tests {
             from_hex: from.to_string(),
             signers: signers
                 .iter()
-                .map(|s| SignerRow { anchor_hex: s.to_string() })
+                .map(|s| SignerRow {
+                    anchor_hex: s.to_string(),
+                })
                 .collect(),
         }
     }
@@ -1797,9 +1801,15 @@ mod registry_tests {
             ..CoreState::default()
         };
         // received + signed by the author -> trusted
-        assert!(!row_untrusted_in(&st, &row(&"bb".repeat(32), &[&"bb".repeat(32)])));
+        assert!(!row_untrusted_in(
+            &st,
+            &row(&"bb".repeat(32), &[&"bb".repeat(32)])
+        ));
         // received + author present but unsigned -> UNTRUSTED
-        assert!(row_untrusted_in(&st, &row(&"bb".repeat(32), &[&"cc".repeat(32)])));
+        assert!(row_untrusted_in(
+            &st,
+            &row(&"bb".repeat(32), &[&"cc".repeat(32)])
+        ));
         // received + NO signature at all -> untrusted
         assert!(row_untrusted_in(&st, &row(&"bb".repeat(32), &[])));
         // own row exempt (no self-signature needed for the face)
@@ -1818,7 +1828,10 @@ mod registry_tests {
         assert_eq!(author_display_in(&st, &stranger), "a");
         // the signer face: remark-preferred, then the short anchor
         assert_eq!(signer_display_in(&st, &"bb".repeat(32)), "alice");
-        assert_eq!(signer_display_in(&st, &"cc".repeat(32)), format!("{}…", &"c".repeat(12)));
+        assert_eq!(
+            signer_display_in(&st, &"cc".repeat(32)),
+            format!("{}…", &"c".repeat(12))
+        );
     }
 }
 

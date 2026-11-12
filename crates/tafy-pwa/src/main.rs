@@ -582,7 +582,7 @@ fn Authors() -> Element {
     let err = use_signal(String::new);
     // the roster grows with observed anchors and the core only
     // pushes on the verbs — re-ask on every mount
-    use_effect(move || core::identities_refresh());
+    use_effect(core::identities_refresh);
     let ids = core::CORE.read().identities.clone();
     let self_anchor = core::CORE.read().self_anchor.clone();
     rsx! {
@@ -616,7 +616,10 @@ fn AuthorsRow(
     let is_self = self_anchor.as_deref() == Some(id.anchor_hex.as_str());
     // the name face: the remark when set, else the F1 short form of
     // the anchor itself
-    let name = id.remark.clone().unwrap_or_else(|| core::short_anchor(&id.anchor_hex));
+    let name = id
+        .remark
+        .clone()
+        .unwrap_or_else(|| core::short_anchor(&id.anchor_hex));
     let is_editing = editing.read().as_deref() == Some(id.anchor_hex.as_str());
     // per-closure captures (a move closure takes its variable): one
     // hex clone per button
