@@ -701,9 +701,9 @@ fn relay_saved() -> String {
 
 // SHOW RECEIVED-MESSAGE TIMES (the principal, 2026-11-12): the
 // meta.ts line under each message becomes OPTIONAL — a Settings
-// toggle. Default ON (the shipped face is preserved; the toggle's
-// purpose is the ability to hide). The stamp rows are the timestamp
-// FEATURE and always render (fmt_ts is now local-tz for both).
+// toggle. DEFAULT OFF (the principal, pre-deploy: the meta.ts lines
+// eat screen space in volume; the stamps — the ts FEATURE — always
+// render). Flipping ON restores the per-message time lines.
 static SHOW_RECV_TS_KEY: &str = "tafy.show_recv_ts";
 
 #[cfg(target_arch = "wasm32")]
@@ -711,12 +711,12 @@ fn show_recv_ts() -> bool {
     web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
         .and_then(|s| s.get_item(SHOW_RECV_TS_KEY).ok().flatten())
-        .map(|v| v != "0")
-        .unwrap_or(true)
+        .map(|v| v == "1")
+        .unwrap_or(false)
 }
 #[cfg(not(target_arch = "wasm32"))]
 fn show_recv_ts() -> bool {
-    true
+    false
 }
 
 #[cfg(target_arch = "wasm32")]
