@@ -231,6 +231,19 @@ body {
   text-overflow: ellipsis;
 }
 
+/* the help face (About -> Help): the sub lines ARE the content —
+   they wrap instead of clipping (the public-test usage guide) */
+.row.help .row-main {
+  flex: 1;
+}
+.row.help .row-sub {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  margin-top: 4px;
+  line-height: 1.45;
+}
+
 .badge {
   flex: none;
   padding: 1px 8px;
