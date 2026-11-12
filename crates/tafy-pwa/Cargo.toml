@@ -5,7 +5,7 @@ name = "tafy-pwa"
 # one verification round (deployed or not); deploy ships the current
 # number. Single source: this field feeds env!("CARGO_PKG_VERSION")
 # (the version display); licenses.html carries no stamp (A18).
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
