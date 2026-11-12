@@ -41,6 +41,7 @@ zconned.workspace = true
 prost = "0.14.4"
 zconned-stdio-types.workspace = true
 zconned-io-link.workspace = true
+zconned-material.workspace = true
 protobuf-varint-deframer.workspace = true
 
 # -- wasm platform faces (versions pinned to the graph: wasm-bindgen

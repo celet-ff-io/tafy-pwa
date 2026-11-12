@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use prost::Message as _;
+use zconned_material::CLAIM_KIND_TS;
 use zconned::storage::Storage;
 use zconned_stdio_types::{IncomingFrame, OutgoingFrame, PROTOCOL_VERSION};
 
@@ -390,6 +391,170 @@ async fn host_loop_handshake_identity_threads_commit() {
             assert!(
                 dirs.contains(&"threads".to_string()),
                 "the store holds a threads dir after the commit: {dirs:?}"
+            );
+        })
+        .await;
+}
+
+/// THE TIMESTAMP DISCIPLINE (107 parity, conformance): the stamp
+/// message commits FIRST (empty text/plain + the ts claim the core
+/// ATTESTS — non-empty data at the package push) and the text then
+/// chains FROM the stamp row (the text's prev[0] = the stamp's own
+/// ref). This is the native proof of the chain the wasm composer
+/// produces through core::commit.
+#[tokio::test(flavor = "current_thread")]
+async fn host_loop_stamp_discipline_chains_text_to_stamp() {
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let ram: Arc<dyn Storage> = Arc::new(Ram::default());
+            let mut link = spawn_core(ram, true);
+
+            // handshake
+            let raw = zconned_stdio_types::Handshake {
+                version: PROTOCOL_VERSION,
+            };
+            link.stdin_w
+                .send(raw.encode_length_delimited_to_vec())
+                .unwrap();
+            let ack = link.recv_handshake().await;
+            assert_eq!(ack, PROTOCOL_VERSION, "handshake version mismatch");
+
+            // -- the STAMP commit: fresh cursor -> empty content ->
+            // the ts claim (empty data, staged pending) -> commit --
+            link.send(&IncomingFrame {
+                method: Some(zconned_stdio_types::incoming_frame::Method::MsgCursorSet(
+                    zconned_stdio_types::MsgCursorSet {
+                        at: vec![],
+                        fresh: Some(zconned_stdio_types::Fresh {}),
+                    },
+                )),
+            });
+            let f = link.recv().await;
+            assert_eq!(frame_tag(&f), "msg_cursor_push", "cursor wrong: {f:?}");
+
+            link.send(&IncomingFrame {
+                method: Some(
+                    zconned_stdio_types::incoming_frame::Method::MsgDraftContentSet(
+                        zconned_stdio_types::MsgDraftContentSet {
+                            kind: "text/plain".to_string(),
+                            data: Vec::new(),
+                        },
+                    ),
+                ),
+            });
+            let f = link.recv().await;
+            assert_eq!(frame_tag(&f), "msg_draft_push", "draft wrong: {f:?}");
+
+            link.send(&IncomingFrame {
+                method: Some(
+                    zconned_stdio_types::incoming_frame::Method::MsgDraftClaimsAdd(
+                        zconned_stdio_types::MsgDraftClaimsAdd {
+                            kind: CLAIM_KIND_TS.to_string(),
+                            data: Vec::new(),
+                        },
+                    ),
+                ),
+            });
+            let f = link.recv().await;
+            assert_eq!(frame_tag(&f), "msg_draft_push", "claim wrong: {f:?}");
+
+            link.send(&IncomingFrame {
+                method: Some(zconned_stdio_types::incoming_frame::Method::MsgDraftCommit(
+                    zconned_stdio_types::MsgDraftCommit {},
+                )),
+            });
+            let f1 = link.recv().await;
+            assert_eq!(
+                frame_tag(&f1),
+                "msg_package_push",
+                "stamp commit wrong: {f1:?}"
+            );
+            let _ = link.recv().await; // the resting draft
+
+            // the stamp entry: empty text + the ATTESTED ts claim
+            let stamp_entry = match f1.frame {
+                Some(zconned_stdio_types::outgoing_frame::Frame::MsgPackagePush(p)) => {
+                    p.package.unwrap().entry.unwrap()
+                }
+                other => panic!("expected the stamp package: {other:?}"),
+            };
+            let stamp_text = stamp_entry
+                .content
+                .as_ref()
+                .and_then(|c| c.value.as_ref())
+                .map(|v| v.data.clone())
+                .unwrap_or_default();
+            assert!(stamp_text.is_empty(), "the stamp's text must be empty");
+            let ts_claim = stamp_entry
+                .claims
+                .iter()
+                .find(|c| c.kind == CLAIM_KIND_TS)
+                .and_then(|c| c.value.as_ref())
+                .map(|v| v.data.clone())
+                .unwrap_or_default();
+            assert!(
+                !ts_claim.is_empty(),
+                "the core must ATTEST the ts claim at commit (non-empty value)"
+            );
+            let stamp_ref = stamp_entry
+                .meta
+                .as_ref()
+                .map(|m| zconned_material::MsgRef {
+                    ver_major: stamp_entry.ver_major,
+                    ver_minor: stamp_entry.ver_minor,
+                    algo: m.algo.clone(),
+                    digest: m.digest.clone(),
+                })
+                .unwrap();
+
+            // -- the TEXT commit: the cursor re-positions AT the
+            // stamp row (the recomputed leaf) -> the text -> commit --
+            link.send(&IncomingFrame {
+                method: Some(zconned_stdio_types::incoming_frame::Method::MsgCursorSet(
+                    zconned_stdio_types::MsgCursorSet {
+                        at: vec![stamp_ref.clone()],
+                        fresh: None,
+                    },
+                )),
+            });
+            let f = link.recv().await;
+            assert_eq!(frame_tag(&f), "msg_cursor_push", "cursor 2 wrong: {f:?}");
+
+            link.send(&IncomingFrame {
+                method: Some(
+                    zconned_stdio_types::incoming_frame::Method::MsgDraftContentSet(
+                        zconned_stdio_types::MsgDraftContentSet {
+                            kind: "text/plain".to_string(),
+                            data: b"hello after the stamp".to_vec(),
+                        },
+                    ),
+                ),
+            });
+            let _ = link.recv().await; // msg_draft_push
+
+            link.send(&IncomingFrame {
+                method: Some(zconned_stdio_types::incoming_frame::Method::MsgDraftCommit(
+                    zconned_stdio_types::MsgDraftCommit {},
+                )),
+            });
+            let f1 = link.recv().await;
+            assert_eq!(
+                frame_tag(&f1),
+                "msg_package_push",
+                "text commit wrong: {f1:?}"
+            );
+
+            // THE CHAIN: the text's parent = the stamp's own ref
+            let text_entry = match f1.frame {
+                Some(zconned_stdio_types::outgoing_frame::Frame::MsgPackagePush(p)) => {
+                    p.package.unwrap().entry.unwrap()
+                }
+                other => panic!("expected the text package: {other:?}"),
+            };
+            assert_eq!(
+                text_entry.prev.first().map(|r| r.digest.as_slice()),
+                Some(stamp_ref.digest.as_slice()),
+                "the text must chain FROM the stamp row"
             );
         })
         .await;

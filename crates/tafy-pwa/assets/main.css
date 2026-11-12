@@ -361,6 +361,16 @@ body {
   color: var(--dim);
 }
 
+/* THE TIMESTAMP MESSAGE (107's timestamp discipline, web face):
+   the stamp row renders as the standalone dim ts line — no author,
+   no bubble; the row IS the timestamp (a chat's time separator). */
+.msg-stamp {
+  margin: 14px 0 8px;
+  font-size: 12px;
+  color: var(--dim);
+  text-align: center;
+}
+
 .sys {
   margin: 0 0 16px;
   padding: 10px 12px;

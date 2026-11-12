@@ -74,6 +74,11 @@ pub struct ThreadRow {
     pub id: String,
 }
 
+/// The ts claim kind (the registry kind the core ATTESTS at commit:
+/// the interface supplies an empty claim, the core overwrites the
+/// value with its own RFC3339 commit time — never interface-supplied).
+const CLAIM_KIND_TS: &str = "application/vnd.zconn.ts";
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct LogRow {
     /// the entry's own MsgRef in id form (the cursor's `at` leaf)
@@ -82,6 +87,11 @@ pub struct LogRow {
     pub text: String,
     /// unix ms (the row's local record time)
     pub ts_ms: u64,
+    /// THE TIMESTAMP MESSAGE (107's timestamp discipline): an empty
+    /// text/plain entry carrying the core-attested ts claim — the row
+    /// renders as the standalone dim ts line (no author, no bubble:
+    /// the row IS the timestamp)
+    pub stamp: bool,
 }
 
 /// One contact (a Peer record's display face; 107's W2, web-adapted).
@@ -269,7 +279,7 @@ fn entry_row(entry: &zconned_stdio_types::Entry) -> LogRow {
     let ts_ms = entry
         .claims
         .iter()
-        .find(|c| c.kind == "application/vnd.zconn.ts")
+        .find(|c| c.kind == CLAIM_KIND_TS)
         .and_then(|c| c.value.as_ref())
         .map(|v| String::from_utf8_lossy(&v.data).into_owned())
         .and_then(|s| chrono_millis(&s))
@@ -293,8 +303,12 @@ fn entry_row(entry: &zconned_stdio_types::Entry) -> LogRow {
                 .map(|m| m.from.as_slice())
                 .unwrap_or(&[]),
         ),
-        text,
+        text: text.clone(),
         ts_ms,
+        stamp: text.is_empty()
+            && entry.claims.iter().any(|c| {
+                c.kind == CLAIM_KIND_TS && c.value.as_ref().is_some_and(|v| !v.data.is_empty())
+            }),
     }
 }
 
@@ -1113,9 +1127,77 @@ pub fn load_thread(id: String) {
 /// thread id, the resting draft). thread_hex = None starts a fresh
 /// chain (the core generates the genesis parent); Some(id) commits
 /// onto the thread's leaf (day-one linear frontier).
+///
+/// THE TIMESTAMP DISCIPLINE (107 parity, 2026-11-12): the interface
+/// keeps the stamp state (a stamp within the window). When the state
+/// is down — never stamped, or the last stamp aged out — the STAMP
+/// MESSAGE commits FIRST (empty text/plain + the ts claim the core
+/// attests at commit) and the text then chains FROM the stamp row
+/// (the recomputed cursor leaf = the stamp's own ref). 107 queues
+/// the text for the async receipt; ours is an awaited single-flight
+/// chain, so the text simply follows the stamp commit, and the stamp
+/// state moves on SUCCESS only (a failed stamp leaves the state
+/// down — the next send retries).
 pub async fn commit(thread_hex: Option<&str>, text: &str) -> Result<String, String> {
+    let mut hex = thread_hex.map(|s| s.to_string());
+    if stamp_needed() {
+        hex = Some(commit_one(hex.as_deref(), "", true).await?);
+        STAMPED_AT_MS.store(page_now_ms(), std::sync::atomic::Ordering::Relaxed);
+    }
+    commit_one(hex.as_deref(), text, false).await
+}
+
+/// The stamp state: the page clock (ms) of the last stamp commit;
+/// 0 = never stamped. The interface AGES the state out by comparison
+/// (107's insight: a timer and this aging are observably identical).
+/// The page clock, not the unix clock: the state never persists
+/// (a reload restarts it at 0 = the first send stamps — same as
+/// 107, whose state starts None every app start).
+static STAMPED_AT_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+const STAMP_WINDOW_MS: u64 = 5 * 60 * 1000;
+
+/// Whether the stamp state is down (107's stamp_needed): never
+/// stamped, or the last stamp is older than the window.
+fn stamp_needed() -> bool {
+    stamp_needed_at(
+        STAMPED_AT_MS.load(std::sync::atomic::Ordering::Relaxed),
+        page_now_ms(),
+    )
+}
+
+/// The window test, time-injected (the unit-testable core of the
+/// discipline).
+fn stamp_needed_at(stamped_ms: u64, now_ms: u64) -> bool {
+    stamped_ms == 0 || now_ms.saturating_sub(stamped_ms) >= STAMP_WINDOW_MS
+}
+
+/// The page clock in ms. wasm: performance.now() (the time origin's
+/// scale — fine for the aging math, every term shares the origin).
+/// native: the unix clock (the test face).
+fn page_now_ms() -> u64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::window()
+            .and_then(|w| w.performance())
+            .map(|p| p.now() as u64)
+            .unwrap_or(0)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    }
+}
+
+/// ONE commit chain (the discipline's atomic unit): cursor ->
+/// draft content -> [stamp claim] -> commit. stamp = the timestamp
+/// message: empty text/plain + the ts claim (empty data — the core
+/// attests the value at commit).
+async fn commit_one(thread_hex: Option<&str>, text: &str, stamp: bool) -> Result<String, String> {
     trace(&format!(
-        "[commit] enter: thread={thread_hex:?} len={}",
+        "[commit] enter: thread={thread_hex:?} len={} stamp={stamp}",
         text.len()
     ));
     // 1. the cursor
@@ -1143,7 +1225,8 @@ pub async fn commit(thread_hex: Option<&str>, text: &str) -> Result<String, Stri
         Expect::One(AnswerKind::MsgCursorPush),
     )
     .await?;
-    // 2. the draft content (day-one kind text/plain; no vendor claims)
+    // 2. the draft content (day-one kind text/plain; the stamp's
+    // data is legitimately empty)
     request(
         incoming(M::MsgDraftContentSet(
             zconned_stdio_types::MsgDraftContentSet {
@@ -1154,6 +1237,21 @@ pub async fn commit(thread_hex: Option<&str>, text: &str) -> Result<String, Stri
         Expect::One(AnswerKind::MsgDraftPush),
     )
     .await?;
+    // 2b. the stamp's claim: the registry kind stages PENDING (empty
+    // data — the core overwrites it with its own clock at commit;
+    // an interface-supplied value would be discarded anyway)
+    if stamp {
+        request(
+            incoming(M::MsgDraftClaimsAdd(
+                zconned_stdio_types::MsgDraftClaimsAdd {
+                    kind: CLAIM_KIND_TS.to_string(),
+                    data: Vec::new(),
+                },
+            )),
+            Expect::One(AnswerKind::MsgDraftPush),
+        )
+        .await?;
+    }
     // 3. the commit: the core stamps the registry claims (ts) and
     // answers the B7 pair (msg_package_push with the COMPLETE
     // roster + the resting draft)
@@ -1360,6 +1458,7 @@ pub fn relay_disconnect() {
 #[cfg(test)]
 mod ts_claim_tests {
     use super::chrono_millis;
+    use super::stamp_needed_at;
     #[test]
     fn rfc3339_utc_parses() {
         // cross-checked against an independent epoch calculator
@@ -1379,5 +1478,16 @@ mod ts_claim_tests {
         assert_eq!(chrono_millis("2026-11-11T08:47:00+01:00"), None);
         assert_eq!(chrono_millis("2026-02-29T00:00:00Z"), None);
         assert_eq!(chrono_millis("garbage"), None);
+    }
+
+    #[test]
+    fn stamp_window_aging() {
+        // the discipline's window core (107 parity): never stamped
+        // stamps; within the 5-minute window does not; the boundary
+        // (>= 300s) stamps again; a reload restarts at 0.
+        assert!(stamp_needed_at(0, 1_000));
+        assert!(!stamp_needed_at(1_000_000, 1_000_000 + 299_999));
+        assert!(stamp_needed_at(1_000_000, 1_000_000 + 300_000));
+        assert!(stamp_needed_at(1_000_000, 1_000_000 + 400_000));
     }
 }

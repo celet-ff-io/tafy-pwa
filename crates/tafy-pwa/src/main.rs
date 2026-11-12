@@ -358,7 +358,10 @@ fn thread_preview(id: &str) -> String {
         .read()
         .logs
         .get(id)
-        .and_then(|rows| rows.last().map(|r| r.text.clone()))
+        // the preview SKIPS stamp rows (a stamp tail would render an
+        // empty line — the timestamp message carries no words); a
+        // stamp-only thread keeps the honest dash
+        .and_then(|rows| rows.iter().rev().find(|r| !r.stamp).map(|r| r.text.clone()))
         .unwrap_or_else(|| "—".to_string())
 }
 
@@ -958,10 +961,18 @@ fn ThreadPage(id: String) -> Element {
                         p { class: "hint", "Empty thread — say something" }
                     }
                     for e in rows {
-                        div { key: "{e.ref_id}", class: "msg",
-                            div { class: "msg-author", class: if e.author == "Me" { "self" } else { "" }, "{e.author}" }
-                            div { class: "msg-text", "{e.text}" }
-                            div { class: "msg-ts", "{fmt_ts(e.ts_ms)}" }
+                        if e.stamp {
+                            // THE TIMESTAMP MESSAGE (107's timestamp
+                            // discipline, web face): the stamp row =
+                            // the standalone dim ts line — no author,
+                            // no bubble; the row IS the timestamp
+                            div { key: "{e.ref_id}", class: "msg-stamp", "{fmt_ts(e.ts_ms)}" }
+                        } else {
+                            div { key: "{e.ref_id}", class: "msg",
+                                div { class: "msg-author", class: if e.author == "Me" { "self" } else { "" }, "{e.author}" }
+                                div { class: "msg-text", "{e.text}" }
+                                div { class: "msg-ts", "{fmt_ts(e.ts_ms)}" }
+                            }
                         }
                     }
                 } else {
